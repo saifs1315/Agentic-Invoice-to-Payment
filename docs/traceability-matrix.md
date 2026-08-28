@@ -3,7 +3,7 @@
 | Assignment requirement | Implementation evidence |
 |---|---|
 | Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/extraction.py`, `/api/v1/mailbox/poll` |
-| Contextual agentic workflow | `app/workflow.py` LangGraph state graph; `app/context.py` LlamaIndex retrieval |
+| Contextual agentic workflow | `app/workflow.py` executable LangGraph branches; durable `workflow_runs`; `app/context.py` LlamaIndex documents + pgvector retrieval |
 | 2-way / 3-way matching | `app/matching.py`, configurable tolerances in `app/config.py` |
 | Exception routing | variance codes, exception status, `/api/v1/exceptions`, decision endpoint, `/review` |
 | Payment Journal posting | `app/erp.py`, `/api/v1/post-payment-journal`, idempotency header |
@@ -20,5 +20,4 @@
 | Evaluation report | `docs/evaluation-report.md`, evaluator, dataset, fixtures |
 | Architecture diagrams | editable Mermaid and rendered SVG under `docs/diagrams/` |
 | 10–15 slide deck | `presentation/LedgerPilot_Assignment_Deck.pptx` |
-| GitHub URL | Requires user authorization/authentication for external publication |
-
+| GitHub URL | `https://github.com/saifs1315/Agentic-Invoice-to-Payment` |

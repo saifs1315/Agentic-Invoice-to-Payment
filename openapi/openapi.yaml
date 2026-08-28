@@ -102,6 +102,20 @@ paths:
                   database: {type: string, enum: [memory, postgresql]}
                   erp: {type: string}
                   audit_chain_valid: {type: boolean}
+  /api/v1/workflows/{invoice_id}:
+    get:
+      tags: [Operations]
+      summary: Inspect the latest durable workflow node and state
+      operationId: getWorkflowStatus
+      parameters:
+        - {name: invoice_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Latest workflow state
+          content:
+            application/json:
+              schema: {type: object, additionalProperties: true}
+        "404": {description: Invoice not found}
   /api/v1/exceptions:
     get:
       tags: [Human oversight]
@@ -265,4 +279,3 @@ components:
       properties:
         chain_valid: {type: boolean}
         events: {type: array, items: {$ref: "#/components/schemas/AuditEvent"}}
-

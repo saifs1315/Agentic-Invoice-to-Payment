@@ -9,7 +9,7 @@ try:
     repo = PostgresRepository(settings.database_url) if settings.database_url.startswith("postgresql") else MemoryRepository()
 except Exception:
     repo = MemoryRepository()
-audit = AuditLedger(getattr(repo, "persist_audit", None))
+audit = AuditLedger(getattr(repo, "persist_audit", None), repo.load_audit_events())
 erp = MockERP()
 workflow = InvoiceWorkflow(repo, audit, erp, settings)
 observability_enabled = configure_observability()

@@ -1,0 +1,30 @@
+{
+  "dataset_size": 6,
+  "formats": {
+    "json": {
+      "documents": 3,
+      "field_accuracy": 1.0,
+      "decision_accuracy": 1.0
+    },
+    "pdf": {
+      "documents": 2,
+      "field_accuracy": 1.0,
+      "decision_accuracy": 1.0
+    },
+    "png": {
+      "documents": 1,
+      "field_accuracy": 1.0,
+      "decision_accuracy": 1.0
+    }
+  },
+  "field_level_extraction_accuracy": 1.0,
+  "document_exact_match_rate": 1.0,
+  "exception_classification_accuracy": 1.0,
+  "exception_routing_recall": 1.0,
+  "straight_through_processing_rate": 0.5,
+  "false_auto_post_rate": 0.0,
+  "mean_extraction_confidence": 0.94,
+  "audit_chain_integrity_rate": 1.0,
+  "failed_documents": [],
+  "notes": "Synthetic six-document benchmark spanning JSON, text-native PDF, and scan-like PNG. Finance decisions remain deterministic; production validation requires permissioned vendor samples."
+}

@@ -23,6 +23,8 @@ class WorkflowTests(TestCase):
         self.workflow.ingest(self.invoice)
         matched = self.workflow.match(self.invoice.id)
         self.assertTrue(matched["result"]["matched"])
+        self.assertIn(self.invoice.id, self.repo.workflow_states)
+        self.assertEqual(self.repo.workflow_states[self.invoice.id]["node"], "auto_post")
         first = self.workflow.post(self.invoice.id, "same-key")
         second = self.workflow.post(self.invoice.id, "same-key")
         self.assertEqual(first["journal_id"], second["journal_id"])
@@ -35,4 +37,3 @@ class WorkflowTests(TestCase):
         self.workflow.ingest(duplicate)
         result = self.workflow.match(duplicate.id)["result"]
         self.assertIn("DUPLICATE_INVOICE", {v["code"] for v in result["variances"]})
-

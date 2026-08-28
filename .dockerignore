@@ -1,0 +1,17 @@
+.git
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.env
+AI-Engineer - Assignment.docx
+data
+docs
+evaluation
+openapi
+presentation
+scripts
+tests
+

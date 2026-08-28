@@ -7,15 +7,16 @@ The prototype intentionally separates probabilistic AI from financial controls: 
 ## What is included
 
 - Microsoft Graph shared-mailbox adapter plus direct PDF, image, HTML, text, and JSON upload.
-- Docling document conversion with structured extraction and evidence references.
-- LangGraph workflow with an offline execution fallback for deterministic tests.
-- LlamaIndex policy retrieval with a deterministic fallback.
+- Typed extraction with PDF text, EasyOCR, Docling fallback, optional validated Ollama JSON, and evidence references.
+- LangGraph workflow that executes policy retrieval, deterministic matching, conditional posting, and review routing.
+- LlamaIndex document normalization with PostgreSQL/pgvector policy retrieval and an offline fallback.
 - Two-way and three-way PO/GR matching with configurable tolerances.
 - Exception detection for missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
 - Human approval/rejection API and review queue.
 - Mock ERP adapter with idempotent payment-journal posting.
 - Mirrored AR remittance-to-open-item cash application.
 - SHA-256 hash-chained audit events and optional PostgreSQL persistence.
+- Durable PostgreSQL workflow state, journals, remittances, and policy embeddings.
 - PostgreSQL 16 + pgvector schema, Ollama, and Arize Phoenix services.
 - OpenAPI contract, automated tests, synthetic evaluation harness, architecture diagrams, and presentation deck.
 
@@ -55,6 +56,8 @@ docker compose exec ollama ollama pull llama3.2:3b
 ```
 
 Phoenix is then available at <http://localhost:6006>.
+
+OCR models are downloaded into the container's temporary cache on first image processing. For a reusable local evaluation cache, mount a volume at `/tmp` as shown in `docs/evaluation-report.md` or run the Compose API service normally.
 
 ## Local development
 
@@ -126,6 +129,7 @@ Call `POST /api/v1/mailbox/poll?max_messages=10`. The adapter accepts PDF, PNG/J
 | `REQUIRE_HUMAN_APPROVAL` | `false` | Require explicit approval before every posting |
 | `AUTO_POST_ENABLED` | `true` | Deployment policy flag for automatic posting |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Local model used by optional AI extensions |
+| `LLM_EXTRACTION_ENABLED` | `false` | Ask Ollama for schema-constrained invoice JSON before regex fallback |
 | `LLM_EXPLANATIONS_ENABLED` | `false` | Generate non-authoritative reviewer explanations with Ollama |
 | `DATABASE_URL` | `memory://` locally | PostgreSQL connection string |
 | `MAX_UPLOAD_MB` | `15` | Attachment size limit |
@@ -142,23 +146,25 @@ For SAP, Oracle, or NetSuite, implement the same interface, map external IDs int
 
 ## Evaluation results
 
-The checked-in benchmark has three synthetic documents: clean match, out-of-tolerance price variance, and missing PO. The current reproducible results are:
+The checked-in benchmark has six synthetic documents across JSON, PDF, and scan-like PNG: clean matches plus price-variance and missing-PO exceptions. The current reproducible results are:
 
 | Metric | Result |
 |---|---:|
 | Field-level extraction accuracy | 100.00% |
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
-| Straight-through-processing rate | 33.33% |
+| Exception-routing recall | 100.00% |
+| Straight-through-processing rate | 50.00% |
+| False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
 
-These numbers validate behavior, not production generalization. The small JSON benchmark avoids OCR variability; a production pilot must use representative, permissioned invoices and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
+These numbers validate controlled behavior, not production generalization. A production pilot must use representative, permissioned invoices and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
 
 ## Security and control posture
 
 - Containers run as a non-root user with a read-only filesystem and `no-new-privileges`.
 - Uploads are size-limited; mailbox attachments are allow-listed by extension.
-- Vendor/invoice uniqueness and hash-chained audit events support duplicate and tamper detection.
+- Deterministic duplicate detection and hash-chained audit events support duplicate and tamper controls.
 - Posting requires a successful deterministic match and is idempotent.
 - Human decisions require an actor and comment and become audit events.
 - No credentials are committed; `.env` is ignored.

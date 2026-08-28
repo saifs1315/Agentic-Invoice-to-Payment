@@ -28,8 +28,8 @@ class AuditEvent:
 class AuditLedger:
     """Append-only, hash-chained audit ledger for decision provenance."""
 
-    def __init__(self, sink=None) -> None:
-        self._events: list[AuditEvent] = []
+    def __init__(self, sink=None, initial_events: list[AuditEvent] | None = None) -> None:
+        self._events: list[AuditEvent] = list(initial_events or [])
         self._lock = RLock()
         self._sink = sink
 

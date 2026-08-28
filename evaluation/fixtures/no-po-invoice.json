@@ -1,0 +1,16 @@
+{
+  "vendor_id": "VEND-003",
+  "invoice_number": "INV-2026-003",
+  "invoice_date": "2026-08-22",
+  "currency": "USD",
+  "total": "400.00",
+  "lines": [
+    {
+      "description": "Unplanned service",
+      "quantity": "1",
+      "unit_price": "400.00",
+      "amount": "400.00"
+    }
+  ]
+}
+

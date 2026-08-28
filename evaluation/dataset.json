@@ -1,0 +1,6 @@
+[
+  {"file": "fixtures/po-1001-invoice.json", "expected_fields": {"vendor_id": "VEND-001", "invoice_number": "INV-2026-001", "po_number": "PO-1001", "currency": "USD", "total": "1000.00"}, "expected_match": true, "expected_exception": null},
+  {"file": "fixtures/po-1001-price-variance.json", "expected_fields": {"vendor_id": "VEND-001", "invoice_number": "INV-2026-002", "po_number": "PO-1001", "currency": "USD", "total": "1100.00"}, "expected_match": false, "expected_exception": "PRICE_VARIANCE"},
+  {"file": "fixtures/no-po-invoice.json", "expected_fields": {"vendor_id": "VEND-003", "invoice_number": "INV-2026-003", "po_number": null, "currency": "USD", "total": "400.00"}, "expected_match": false, "expected_exception": "MISSING_PO"}
+]
+

@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+data/uploads/*
+!data/uploads/.gitkeep
+evaluation/results/*.json
+!evaluation/results/.gitkeep
+dist/
+.deck-build/
+*.inspect.ndjson
+AI-Engineer - Assignment.docx

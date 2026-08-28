@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ledgerpilot"
+version = "0.1.0"
+description = "Auditable agentic AP invoice and AR remittance automation prototype"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.116.1",
+  "uvicorn[standard]==0.35.0",
+  "python-multipart==0.0.20",
+  "httpx==0.28.1",
+  "pydantic-settings==2.10.1",
+  "psycopg[binary,pool]==3.2.9",
+  "langgraph==0.6.6",
+  "llama-index-core==0.13.3",
+  "llama-index-llms-ollama==0.7.1",
+  "docling==2.48.0",
+  "arize-phoenix-otel==0.13.1",
+  "openinference-instrumentation-langchain==0.1.51",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.1",
+  "pytest-cov==6.2.1",
+  "ruff==0.12.9",
+]
+eval = ["ragas==0.3.2", "datasets==4.0.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --disable-warnings"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

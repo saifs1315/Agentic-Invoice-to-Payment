@@ -1,0 +1,268 @@
+openapi: 3.1.0
+info:
+  title: LedgerPilot API
+  version: 0.1.0
+  description: Auditable AP invoice and AR remittance automation prototype.
+servers:
+  - url: http://localhost:8000
+paths:
+  /api/v1/ingest-invoice:
+    post:
+      tags: [AP]
+      summary: Ingest and extract an invoice attachment
+      operationId: ingestInvoice
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        "202":
+          description: Invoice accepted and extracted
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IngestResponse"}
+        "413": {description: Attachment exceeds configured maximum}
+        "422": {description: Required invoice fields could not be extracted}
+  /api/v1/match-po:
+    post:
+      tags: [AP]
+      summary: Perform a two-way or three-way match
+      operationId: matchPurchaseOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/MatchRequest"}
+      responses:
+        "200":
+          description: Match result and routing decision
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MatchResponse"}
+        "404": {description: Invoice not found}
+  /api/v1/post-payment-journal:
+    post:
+      tags: [AP]
+      summary: Post a matched and approved invoice to the ERP
+      operationId: postPaymentJournal
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: {type: string, minLength: 1}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PostRequest"}
+      responses:
+        "200":
+          description: Journal posted or the original idempotent result returned
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Journal"}
+        "404": {description: Invoice not found}
+        "409": {description: Match or approval precondition is not satisfied}
+  /api/v1/audit-log:
+    get:
+      tags: [Audit]
+      summary: Retrieve the verifiable audit trail
+      operationId: getAuditLog
+      parameters:
+        - {name: entity_id, in: query, required: false, schema: {type: string}}
+        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
+      responses:
+        "200":
+          description: Hash-chain status and audit events
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuditResponse"}
+  /api/v1/health:
+    get:
+      tags: [Operations]
+      summary: Check service and audit-ledger health
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version, database, audit_chain_valid]
+                properties:
+                  status: {type: string, const: ok}
+                  version: {type: string}
+                  environment: {type: string}
+                  database: {type: string, enum: [memory, postgresql]}
+                  erp: {type: string}
+                  audit_chain_valid: {type: boolean}
+  /api/v1/exceptions:
+    get:
+      tags: [Human oversight]
+      summary: List invoices awaiting review
+      responses:
+        "200":
+          description: Exception queue
+          content:
+            application/json:
+              schema: {type: array, items: {$ref: "#/components/schemas/Invoice"}}
+  /api/v1/exceptions/decision:
+    post:
+      tags: [Human oversight]
+      summary: Approve or reject an invoice exception
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/DecisionRequest"}
+      responses:
+        "200": {description: Decision recorded}
+        "404": {description: Invoice not found}
+  /api/v1/ingest-remittance:
+    post:
+      tags: [AR]
+      summary: Match a remittance to open AR items and apply cash
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RemittanceRequest"}
+      responses:
+        "202": {description: Remittance processed or routed to exception}
+  /api/v1/mailbox/poll:
+    post:
+      tags: [Ingestion]
+      summary: Poll the configured Microsoft Graph shared mailbox
+      parameters:
+        - {name: max_messages, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 10}}
+      responses:
+        "200": {description: Mailbox scan summary}
+        "503": {description: Graph credentials are unavailable}
+components:
+  schemas:
+    InvoiceLine:
+      type: object
+      required: [description, quantity, unit_price, amount]
+      properties:
+        description: {type: string}
+        quantity: {type: string}
+        unit_price: {type: string}
+        amount: {type: string}
+        po_line: {type: [integer, "null"]}
+    Invoice:
+      type: object
+      required: [id, vendor_id, invoice_number, invoice_date, currency, total, lines, source_ref, status]
+      properties:
+        id: {type: string}
+        vendor_id: {type: string}
+        invoice_number: {type: string}
+        invoice_date: {type: string, format: date}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        total: {type: string}
+        po_number: {type: [string, "null"]}
+        lines: {type: array, items: {$ref: "#/components/schemas/InvoiceLine"}}
+        source_ref: {type: string}
+        status: {type: string}
+        confidence: {type: number, minimum: 0, maximum: 1}
+        evidence: {type: object, additionalProperties: {type: string}}
+        created_at: {type: string, format: date-time}
+    IngestResponse:
+      type: object
+      required: [invoice, next_action]
+      properties:
+        invoice: {$ref: "#/components/schemas/Invoice"}
+        next_action: {type: string}
+    MatchRequest:
+      type: object
+      required: [invoice_id]
+      properties:
+        invoice_id: {type: string}
+        require_goods_receipt: {type: boolean, default: true}
+    Variance:
+      type: object
+      required: [code, field, message, blocking]
+      properties:
+        code: {type: string}
+        field: {type: string}
+        expected: {type: [string, "null"]}
+        actual: {type: [string, "null"]}
+        variance_pct: {type: [number, "null"]}
+        message: {type: string}
+        blocking: {type: boolean}
+    MatchResult:
+      type: object
+      required: [id, invoice_id, match_type, matched, variances]
+      properties:
+        id: {type: string}
+        invoice_id: {type: string}
+        match_type: {type: string, enum: [2-way, 3-way]}
+        matched: {type: boolean}
+        variances: {type: array, items: {$ref: "#/components/schemas/Variance"}}
+        po_number: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+    MatchResponse:
+      type: object
+      required: [result, next_action]
+      properties:
+        result: {$ref: "#/components/schemas/MatchResult"}
+        next_action: {type: string}
+    PostRequest:
+      type: object
+      required: [invoice_id]
+      properties:
+        invoice_id: {type: string}
+    Journal:
+      type: object
+      required: [journal_id, invoice_id, vendor_id, amount, currency, status, idempotency_key]
+      properties:
+        journal_id: {type: string}
+        invoice_id: {type: string}
+        vendor_id: {type: string}
+        amount: {type: string}
+        currency: {type: string}
+        status: {type: string, const: posted}
+        idempotency_key: {type: string}
+    DecisionRequest:
+      type: object
+      required: [invoice_id, approved, actor, comment]
+      properties:
+        invoice_id: {type: string}
+        approved: {type: boolean}
+        actor: {type: string, minLength: 3}
+        comment: {type: string, minLength: 3}
+    RemittanceRequest:
+      type: object
+      required: [customer_id, reference, amount, open_item_refs]
+      properties:
+        customer_id: {type: string}
+        reference: {type: string}
+        amount: {type: string}
+        currency: {type: string, default: USD}
+        open_item_refs: {type: array, items: {type: string}}
+        source_ref: {type: string, default: api}
+    AuditEvent:
+      type: object
+      required: [id, entity_type, entity_id, action, actor, payload, previous_hash, event_hash, timestamp]
+      properties:
+        id: {type: string}
+        entity_type: {type: string}
+        entity_id: {type: string}
+        action: {type: string}
+        actor: {type: string}
+        payload: {type: object, additionalProperties: true}
+        previous_hash: {type: string}
+        event_hash: {type: string}
+        timestamp: {type: string, format: date-time}
+    AuditResponse:
+      type: object
+      required: [chain_valid, events]
+      properties:
+        chain_valid: {type: boolean}
+        events: {type: array, items: {$ref: "#/components/schemas/AuditEvent"}}
+

@@ -1,0 +1,14 @@
+stateDiagram-v2
+  [*] --> Received
+  Received --> Extracted: attachment parsed
+  Extracted --> Exception: missing or low-confidence data
+  Extracted --> Matching: required fields valid
+  Matching --> Exception: duplicate, missing PO, variance, or GR shortfall
+  Matching --> Matched: controls pass
+  Matched --> Approved: approval policy satisfied
+  Exception --> Approved: human approves with comment
+  Exception --> Rejected: human rejects
+  Approved --> Posted: idempotent ERP call succeeds
+  Posted --> [*]
+  Rejected --> [*]
+

@@ -77,6 +77,7 @@ class MemoryRepository:
         self.purchase_orders: dict[str, PurchaseOrder] = {}
         self.matches: dict[str, MatchResult] = {}
         self.remittances: dict[str, Remittance] = {}
+        self.remittance_results: dict[str, dict[str, Any]] = {}
         self.journals: dict[str, dict[str, Any]] = {}
         self.open_ar_items: dict[str, dict[str, Any]] = {}
         self.idempotency: dict[str, dict[str, Any]] = {}
@@ -162,7 +163,20 @@ class MemoryRepository:
         )
 
     def save_remittance(self, remittance: Remittance, result: dict[str, Any]) -> None:
-        self.remittances[remittance.id] = remittance
+        with self._lock:
+            self.remittances[remittance.id] = remittance
+            self.remittance_results[remittance.id] = result
+
+    def list_remittances(self, status: Status | None = None) -> list[dict[str, Any]]:
+        remittances = reversed(list(self.remittances.values()))
+        return [
+            {
+                "remittance": remittance.to_dict(),
+                "result": self.remittance_results.get(remittance.id, {}),
+            }
+            for remittance in remittances
+            if status is None or remittance.status == status
+        ]
 
     def load_audit_events(self) -> list[Any]:
         return []
@@ -396,6 +410,16 @@ class PostgresRepository(MemoryRepository):
                     json.dumps({"remittance": remittance.to_dict(), "result": result}),
                 ),
             )
+
+    def list_remittances(self, status: Status | None = None) -> list[dict[str, Any]]:
+        query = "SELECT payload FROM remittances"
+        params: tuple[Any, ...] = ()
+        if status:
+            query += " WHERE status=%s"
+            params = (status.value,)
+        query += " ORDER BY created_at DESC"
+        with self.pool.connection() as conn:
+            return [row[0] for row in conn.execute(query, params).fetchall()]
 
     def persist_audit(self, event: Any) -> None:
         with self.pool.connection() as conn:

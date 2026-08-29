@@ -23,7 +23,7 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 ## AR sequence
 
-The AR path shares ingestion, extraction, exception, and audit patterns. It maps a remittance reference and amount to open customer items. Exact, unambiguous allocations are applied; missing references, customer mismatches, partial payments, overpayments, or already-closed items are exceptions.
+The scoped AR path accepts structured remittance data, maps the customer and amount to referenced open items, applies exact allocations, persists the result, and records the outcome in the audit ledger. Missing references, customer mismatches, partial payments, overpayments, or already-closed items become exceptions visible at `/api/v1/remittance-exceptions`. It deliberately does not reuse the invoice document-extraction pipeline, LangGraph workflow, or AP approval override.
 
 ## Failure and retry behavior
 

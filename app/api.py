@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
@@ -35,7 +36,7 @@ class DecisionRequest(BaseModel):
 class RemittanceRequest(BaseModel):
     customer_id: str
     reference: str
-    amount: str
+    amount: Decimal = Field(gt=0, le=settings.max_monetary_amount)
     currency: str = "USD"
     open_item_refs: list[str]
     source_ref: str = "api"
@@ -126,6 +127,11 @@ def ingest_remittance(request: RemittanceRequest) -> dict[str, Any]:
     repo.save_remittance(remittance, result)
     audit.append("remittance", remittance.id, "cash_application_completed", "agent:ar-matcher", result)
     return {"remittance": remittance.to_dict(), "result": result}
+
+
+@app.get("/api/v1/remittance-exceptions", tags=["AR", "Human oversight"])
+def list_remittance_exceptions() -> list[dict[str, Any]]:
+    return repo.list_remittances(Status.EXCEPTION)
 
 
 @app.get("/api/v1/audit-log", tags=["Audit"])

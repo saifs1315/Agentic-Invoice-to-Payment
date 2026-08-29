@@ -150,6 +150,18 @@ paths:
             schema: {$ref: "#/components/schemas/RemittanceRequest"}
       responses:
         "202": {description: Remittance processed or routed to exception}
+  /api/v1/remittance-exceptions:
+    get:
+      tags: [AR, Human oversight]
+      summary: List failed remittance applications for operator follow-up
+      responses:
+        "200":
+          description: Read-only AR exception queue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/RemittanceExceptionRecord"}
   /api/v1/mailbox/poll:
     post:
       tags: [Ingestion]
@@ -286,6 +298,12 @@ components:
         currency: {type: string, default: USD}
         open_item_refs: {type: array, items: {type: string}}
         source_ref: {type: string, default: api}
+    RemittanceExceptionRecord:
+      type: object
+      required: [remittance, result]
+      properties:
+        remittance: {type: object, additionalProperties: true}
+        result: {type: object, additionalProperties: true}
     AuditEvent:
       type: object
       required: [id, entity_type, entity_id, action, actor, payload, previous_hash, event_hash, timestamp]

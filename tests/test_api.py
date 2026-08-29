@@ -69,3 +69,40 @@ class APITests(TestCase):
             files={"file": ("invoice.json", json.dumps(excessive), "application/json")},
         )
         self.assertEqual(422, rejected.status_code)
+
+    def test_ar_exception_is_visible_to_operators(self):
+        created = self.client.post(
+            "/api/v1/ingest-remittance",
+            json={
+                "customer_id": "CUST-001",
+                "reference": "REM-API-PARTIAL",
+                "amount": "900.00",
+                "currency": "USD",
+                "open_item_refs": ["AR-9001", "AR-9002"],
+                "source_ref": "api:test-ar-exception",
+            },
+        )
+        self.assertEqual(202, created.status_code)
+        self.assertEqual("exception", created.json()["remittance"]["status"])
+
+        queue = self.client.get("/api/v1/remittance-exceptions")
+        self.assertEqual(200, queue.status_code)
+        record = next(
+            item
+            for item in queue.json()
+            if item["remittance"]["id"] == created.json()["remittance"]["id"]
+        )
+        self.assertEqual("amount_mismatch", record["result"]["reason"])
+
+    def test_remittance_amount_limit_is_enforced(self):
+        rejected = self.client.post(
+            "/api/v1/ingest-remittance",
+            json={
+                "customer_id": "CUST-001",
+                "reference": "REM-API-OVERSIZED",
+                "amount": "1000000000.01",
+                "currency": "USD",
+                "open_item_refs": ["AR-9001"],
+            },
+        )
+        self.assertEqual(422, rejected.status_code)

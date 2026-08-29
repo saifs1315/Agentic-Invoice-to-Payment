@@ -14,7 +14,7 @@ The prototype intentionally separates probabilistic AI from financial controls: 
 - Exception detection for arithmetic mismatches, missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
 - Human approval/rejection API and review queue.
 - Mock ERP adapter with idempotent payment-journal posting.
-- Mirrored AR remittance-to-open-item cash application.
+- Structured AR remittance-to-open-item matching and cash application, with failed applications exposed through a read-only operator queue.
 - SHA-256 hash-chained audit events and optional PostgreSQL persistence.
 - Durable PostgreSQL workflow state, journals, remittances, and policy embeddings.
 - PostgreSQL 16 + pgvector schema, Ollama, and Arize Phoenix services.
@@ -108,6 +108,31 @@ Invoke-RestMethod "http://localhost:8000/api/v1/audit-log?entity_id=$($ingested.
 
 To test an exception, ingest `evaluation/fixtures/po-1001-price-variance.json`. Reviewers can approve or reject through `POST /api/v1/exceptions/decision`. Set `REQUIRE_HUMAN_APPROVAL=true` to require approval even for a clean match. Set `AUTO_POST_ENABLED=false` when you want matching and posting to remain two separate demo steps.
 
+### Variance-code reference
+
+| Code | Meaning |
+|---|---|
+| `AMOUNT_OUT_OF_RANGE` | A monetary value exceeds the configured prototype ceiling or is negative. |
+| `QUANTITY_OUT_OF_RANGE` | A quantity exceeds the prototype ceiling or is negative. |
+| `LINE_DETAIL_MISSING` | The invoice has no line-level detail for PO matching. |
+| `LINE_AMOUNT_MISMATCH` | A line amount does not equal quantity multiplied by unit price. |
+| `SUBTOTAL_MISMATCH` | The declared subtotal does not equal the sum of invoice lines. |
+| `INVOICE_TOTAL_MISMATCH` | The final total does not reconcile with subtotal, tax, freight, and discount. |
+| `TAX_VARIANCE` | Tax exceeds the configured percentage of invoice subtotal. |
+| `FREIGHT_VARIANCE` | Freight exceeds the configured percentage of invoice subtotal. |
+| `DISCOUNT_VARIANCE` | Discount exceeds the configured percentage of invoice subtotal. |
+| `DUPLICATE_INVOICE` | The vendor and invoice-number combination already exists. |
+| `MISSING_PO` | The referenced purchase order was not found. |
+| `VENDOR_MISMATCH` | The invoice vendor differs from the purchase-order vendor. |
+| `CURRENCY_MISMATCH` | The invoice currency differs from the purchase-order currency. |
+| `MISSING_PO_LINE` | An invoice line cannot be mapped to a purchase-order line. |
+| `PRICE_VARIANCE` | Unit price exceeds the configured tolerance. |
+| `QUANTITY_VARIANCE` | Invoiced quantity exceeds the configured tolerance or ordered quantity. |
+| `RECEIPT_SHORTFALL` | Invoiced quantity exceeds the goods-received quantity. |
+| `TOTAL_VARIANCE` | The goods subtotal exceeds the expected PO value beyond tolerance. |
+
+AP invoice exceptions appear at `GET /api/v1/exceptions` and support an explicit decision workflow. Failed AR applications appear separately at `GET /api/v1/remittance-exceptions` for operator follow-up; the prototype does not provide an AR approval override.
+
 ## Shared mailbox configuration
 
 Register a Microsoft Entra application with application permission `Mail.Read` scoped to the target shared mailbox, then set:
@@ -132,6 +157,7 @@ The Compose service explicitly passes these values into the API container. Call 
 | `MATCH_MAX_TAX_PCT` | `25.0` | Maximum tax as a percentage of invoice subtotal |
 | `MATCH_MAX_FREIGHT_PCT` | `10.0` | Maximum freight as a percentage of invoice subtotal |
 | `MATCH_MAX_DISCOUNT_PCT` | `30.0` | Maximum discount as a percentage of invoice subtotal |
+| `MAX_MONETARY_AMOUNT` | `1000000000.00` | Positive prototype ceiling for invoice and remittance monetary fields; set per deployment and currency scope |
 | `REQUIRE_HUMAN_APPROVAL` | `false` | Require explicit approval before every posting |
 | `AUTO_POST_ENABLED` | `true` | Deployment policy flag for automatic posting |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Local model used by optional AI extensions |

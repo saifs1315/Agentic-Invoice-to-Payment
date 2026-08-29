@@ -7,7 +7,7 @@
 | 2-way / 3-way matching | `app/matching.py`, configurable tolerances, partial quantities, bounded tax/freight/discount reconciliation, magnitude limits, and blocking arithmetic controls |
 | Exception routing | variance codes, exception status, `/api/v1/exceptions`, decision endpoint, `/review` |
 | Payment Journal posting | `app/erp.py`, `/api/v1/post-payment-journal`, idempotency header |
-| AR remittance matching | `extract_remittance`, `/api/v1/ingest-remittance`, `MockERP.apply_cash` |
+| AR remittance matching | Structured `extract_remittance`, `/api/v1/ingest-remittance`, `MockERP.apply_cash`, durable result persistence, audit event, and read-only `/api/v1/remittance-exceptions` operator queue |
 | Full audit trail | `app/audit.py`, source/evidence/policy/variance/human/ERP events, `/api/v1/audit-log` |
 | PostgreSQL + pgvector | `db/schema.sql`, Compose `pgvector/pgvector:pg16` service |
 | Ollama | pinned Compose service and configuration; optional local model profile |

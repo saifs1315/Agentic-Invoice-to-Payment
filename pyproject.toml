@@ -21,6 +21,7 @@ dependencies = [
   "docling==2.48.0",
   "docling-core[chunking]==2.74.0",
   "easyocr==1.7.2",
+  "opencv-python-headless==4.14.0.94",
   "pypdfium2==4.30.0",
   "ollama==0.6.2",
   "transformers==4.57.6",

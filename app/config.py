@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from decimal import Decimal
 
 
 def _bool(name: str, default: bool) -> bool:
     value = os.getenv(name)
     return default if value is None else value.lower() in {"1", "true", "yes", "on"}
+
+
+def _positive_decimal(name: str, default: str) -> Decimal:
+    value = Decimal(os.getenv(name, default))
+    if value <= 0:
+        raise ValueError(f"{name} must be greater than zero")
+    return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +32,9 @@ class Settings:
     max_tax_pct: float = float(os.getenv("MATCH_MAX_TAX_PCT", "25.0"))
     max_freight_pct: float = float(os.getenv("MATCH_MAX_FREIGHT_PCT", "10.0"))
     max_discount_pct: float = float(os.getenv("MATCH_MAX_DISCOUNT_PCT", "30.0"))
+    max_monetary_amount: Decimal = field(
+        default_factory=lambda: _positive_decimal("MAX_MONETARY_AMOUNT", "1000000000.00")
+    )
     auto_post_enabled: bool = _bool("AUTO_POST_ENABLED", True)
     require_human_approval: bool = _bool("REQUIRE_HUMAN_APPROVAL", False)
     max_upload_mb: int = int(os.getenv("MAX_UPLOAD_MB", "15"))

@@ -7,8 +7,9 @@ from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
+from app.config import settings
 
-MAX_MONETARY_AMOUNT = Decimal("1000000000.00")
+MAX_MONETARY_AMOUNT = settings.max_monetary_amount
 MAX_QUANTITY = Decimal("1000000")
 
 

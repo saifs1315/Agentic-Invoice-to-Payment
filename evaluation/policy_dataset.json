@@ -1,0 +1,18 @@
+[
+  {
+    "query": "Can a vendor invoice number be posted twice?",
+    "reference_context_ids": ["policy-2"]
+  },
+  {
+    "query": "What quantity rule applies to a three-way match and goods received?",
+    "reference_context_ids": ["policy-3"]
+  },
+  {
+    "query": "Must posting be approved, matched, and idempotent?",
+    "reference_context_ids": ["policy-4"]
+  },
+  {
+    "query": "What happens when an invoice has no purchase order?",
+    "reference_context_ids": ["policy-1"]
+  }
+]

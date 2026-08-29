@@ -1,6 +1,18 @@
 {
-  "dataset_size": 6,
+  "dataset_size": 7,
+  "evaluation_coverage": 1.0,
+  "extraction_modes": {
+    "docling": 1,
+    "easyocr": 1,
+    "json": 3,
+    "pdf-text": 2
+  },
   "formats": {
+    "html": {
+      "documents": 1,
+      "field_accuracy": 1.0,
+      "decision_accuracy": 1.0
+    },
     "json": {
       "documents": 3,
       "field_accuracy": 1.0,
@@ -21,10 +33,10 @@
   "document_exact_match_rate": 1.0,
   "exception_classification_accuracy": 1.0,
   "exception_routing_recall": 1.0,
-  "straight_through_processing_rate": 0.5,
+  "straight_through_processing_rate": 0.5714,
   "false_auto_post_rate": 0.0,
-  "mean_extraction_confidence": 0.94,
+  "mean_extraction_confidence": 0.9229,
   "audit_chain_integrity_rate": 1.0,
   "failed_documents": [],
-  "notes": "Synthetic six-document benchmark spanning JSON, text-native PDF, and scan-like PNG. Finance decisions remain deterministic; production validation requires permissioned vendor samples."
+  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. Finance decisions remain deterministic; production validation requires permissioned vendor samples."
 }

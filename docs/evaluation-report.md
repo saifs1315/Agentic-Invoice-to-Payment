@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-LedgerPilot passed all 11 automated unit/workflow tests and produced the expected extraction, match, exception, routing, and posting decisions on a six-document synthetic benchmark spanning JSON, text-native PDF, and scan-like PNG. The controlled set scored 100% for labeled field extraction, match decisions, exception classification, exception routing recall, and audit-chain integrity. No ineligible invoice was auto-posted.
+LedgerPilot passed all 21 automated unit, API, control, workflow, context, and audit tests and produced the expected extraction, match, exception, routing, and posting decisions on a seven-document synthetic benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. The controlled set scored 100% for evaluation coverage, labeled field extraction, match decisions, exception classification, exception routing recall, and audit-chain integrity. No ineligible invoice was auto-posted. A separate four-query policy dataset scored 100% RAGAS non-LLM context precision and recall.
 
 These results demonstrate implementation correctness against known fixtures. They do not estimate production accuracy across diverse vendor layouts, scans, languages, handwriting, or adversarial documents.
 
@@ -13,6 +13,7 @@ These results demonstrate implementation correctness against known fixtures. The
 | JSON | 3 | Clean PO match, 10% price variance, and missing PO |
 | Text-native PDF | 2 | Clean PO match and 10% price variance |
 | Scan-like PNG | 1 | OCR five core fields and one line, then clean PO match |
+| HTML through Docling | 1 | Force Docling conversion, extract fields, then clean PO match |
 
 Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fixtures/`. The PDFs and PNG are generated deterministically by `evaluation/generate_fixtures.py` and contain no real financial data.
 
@@ -20,9 +21,11 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 
 - JSON uses strict Pydantic validation.
 - Text-native PDFs use local PDF text extraction first; Docling remains the rich-layout fallback.
-- Images use local EasyOCR; Docling is the fallback when a direct OCR path is unavailable.
+- Images use local EasyOCR; Docling is the fallback when a direct OCR path is unavailable. The HTML fixture explicitly forces Docling so that path is measured in every full evaluation.
 - Extracted payloads are validated against the same typed schema before finance logic runs.
+- Extraction records the selected backend and the success/failure type of each attempted backend.
 - LangGraph retrieves policy context, runs deterministic matching, and conditionally routes to automatic posting or human review.
+- Policy retrieval uses a real LlamaIndex `VectorStoreIndex` fused with repository/pgvector ranking.
 
 ## Metric definitions
 
@@ -33,7 +36,8 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 - **STP rate:** documents posted without human intervention divided by all documents received.
 - **False auto-post rate:** ineligible documents automatically posted divided by all documents.
 - **Audit-chain integrity:** workflows whose recomputed SHA-256 links remain valid.
-- **RAGAS:** reserved for a production policy-retrieval dataset with question/context/answer labels; it is not applied to deterministic numeric matching.
+- **Evaluation coverage:** documents completing extraction and workflow evaluation divided by all selected documents. Any failure makes the command exit non-zero.
+- **RAGAS context precision/recall:** non-LLM similarity metrics over four labeled finance-policy retrieval cases. RAGAS is applied to retrieval, not to deterministic numeric matching.
 
 ## Results
 
@@ -43,16 +47,19 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
 | Exception-routing recall | 100.00% |
-| Straight-through-processing rate | 50.00% |
+| Evaluation coverage | 100.00% |
+| Straight-through-processing rate | 57.14% |
 | False auto-post rate | 0.00% |
-| Mean extraction confidence | 94.00% |
+| Mean extraction confidence | 92.29% |
 | Audit-chain integrity | 100.00% |
+| RAGAS non-LLM context precision | 100.00% |
+| RAGAS non-LLM context recall | 100.00% |
 
-Per-format field and decision accuracy were 100% for JSON (3), PDF (2), and PNG (1). The result is reproducible with `python evaluation/run_evaluation.py`; machine-readable evidence is checked in at `evaluation/results/latest.json`.
+Per-format field and decision accuracy were 100% for JSON (3), PDF (2), PNG (1), and HTML/Docling (1). Extraction modes were JSON (3), PDF text (2), EasyOCR (1), and Docling (1). Document results are reproducible with `python evaluation/run_evaluation.py`; RAGAS results use `python evaluation/run_rag_evaluation.py`. Machine-readable evidence is checked in under `evaluation/results/`.
 
 ## Automated verification
 
-Eleven tests cover typed extraction validation, text line parsing, clean and boundary matching, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, durable workflow state, idempotent posting, exact AR cash application, and partial-payment escalation.
+Twenty-one tests cover typed extraction and tax fields, API contracts, clean and boundary matching, partial invoices, tax reconciliation, line and total arithmetic, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, human approval gating, durable workflow state, idempotent posting, LlamaIndex retrieval, audit tamper detection, exact AR cash application, and partial-payment escalation.
 
 ## Production pilot plan
 
@@ -62,13 +69,15 @@ Eleven tests cover typed extraction validation, text line parsing, clean and bou
 4. Stratify results by digital PDF, scan quality, language, page count, and line count.
 5. Measure false-STP rate separately and set a safety-first go-live threshold.
 6. Evaluate duplicate recall, exception routing precision, journal reconciliation, and time-to-resolution.
-7. For policy RAG, create question/context/answer triples and use RAGAS context precision, context recall, and faithfulness alongside human review.
+7. Expand the four-case retrieval set with production policy chunks and add LLM-based faithfulness only when a governed evaluator model is available; retain the current deterministic RAGAS precision/recall gate.
 8. Run prompt-injection, altered-bank-detail, malformed-file, oversized-file, and adversarial OCR tests.
 
 ## Limitations
 
-- Six synthetic documents are too few for confidence intervals or vendor-level generalization.
+- Seven synthetic documents are too few for confidence intervals or vendor-level generalization.
 - The scan is controlled and English-only; it does not represent mobile photos or degraded fax inputs.
+- Fixtures are intentionally authored in parser-friendly layouts; the 100% result demonstrates regression correctness, not template generalization.
 - The ERP is a mock adapter; no sandbox API latency or authentication was measured.
 - Human-review timing and reviewer agreement are not measured.
 - Ollama extraction and Phoenix tracing remain optional profiles and require their services to be started.
+- Cumulative prior invoicing per PO line is not modeled; partial invoices are checked against ordered and received upper bounds in the current transaction only.

@@ -14,6 +14,20 @@ from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, Tabl
 ROOT = Path(__file__).resolve().parent / "fixtures"
 
 
+def font_path(bold: bool = False) -> Path | None:
+    names = (
+        ["C:/Windows/Fonts/arialbd.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"]
+        if bold
+        else ["C:/Windows/Fonts/arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
+    )
+    return next((Path(name) for name in names if Path(name).exists()), None)
+
+
+def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    path = font_path(bold)
+    return ImageFont.truetype(str(path), size) if path else ImageFont.load_default(size=size)
+
+
 def create_pdf(path: Path, invoice_number: str, total: str, unit_price: str) -> None:
     styles = getSampleStyleSheet()
     doc = SimpleDocTemplate(
@@ -90,11 +104,9 @@ def create_scan(path: Path) -> None:
     random.seed(42)
     canvas = Image.new("L", (1500, 1900), 246)
     draw = ImageDraw.Draw(canvas)
-    font_path = Path("C:/Windows/Fonts/arial.ttf")
-    bold_path = Path("C:/Windows/Fonts/arialbd.ttf")
-    body = ImageFont.truetype(str(font_path), 36)
-    bold = ImageFont.truetype(str(bold_path), 43)
-    title = ImageFont.truetype(str(bold_path), 58)
+    body = load_font(36)
+    bold = load_font(43, bold=True)
+    title = load_font(58, bold=True)
     draw.rectangle((80, 70, 1420, 1830), fill=255, outline=105, width=3)
     draw.text((130, 120), "NORTHSTAR INDUSTRIAL SUPPLY", font=title, fill=15)
     draw.text((130, 205), "Synthetic evaluation document - no real financial data", font=body, fill=50)

@@ -2,16 +2,16 @@
 
 LedgerPilot is an auditable prototype for agentic accounts-payable invoice processing and accounts-receivable remittance application. It ingests invoice attachments from a shared Microsoft 365 mailbox or API upload, extracts normalized finance data, performs deterministic two-way or three-way matching, routes exceptions for human review, and posts idempotent payment journals to a mock ERP adapter.
 
-The prototype intentionally separates probabilistic AI from financial controls: Docling and optional Ollama/LlamaIndex components interpret documents and retrieve policy context; deterministic code evaluates tolerances, duplicate rules, approval requirements, and posting eligibility.
+The prototype intentionally separates probabilistic AI from financial controls: Docling and optional Ollama interpret documents, while a real LlamaIndex vector index and PostgreSQL/pgvector retrieve policy context. Deterministic code evaluates arithmetic, tolerances, duplicate rules, approval requirements, and posting eligibility.
 
 ## What is included
 
 - Microsoft Graph shared-mailbox adapter plus direct PDF, image, HTML, text, and JSON upload.
-- Typed extraction with PDF text, EasyOCR, Docling fallback, optional validated Ollama JSON, and evidence references.
+- Typed extraction with PDF text, EasyOCR, an explicitly evaluated Docling path, optional validated Ollama JSON, evidence references, and an auditable backend-attempt trace.
 - LangGraph workflow that executes policy retrieval, deterministic matching, conditional posting, and review routing.
-- LlamaIndex document normalization with PostgreSQL/pgvector policy retrieval and an offline fallback.
-- Two-way and three-way PO/GR matching with configurable tolerances.
-- Exception detection for missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
+- LlamaIndex `VectorStoreIndex` retrieval fused with PostgreSQL/pgvector policy ranking and an offline fallback.
+- Two-way and three-way PO/GR matching with configurable tolerances, partial-invoice support, and separate tax/freight/discount reconciliation.
+- Exception detection for arithmetic mismatches, missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
 - Human approval/rejection API and review queue.
 - Mock ERP adapter with idempotent payment-journal posting.
 - Mirrored AR remittance-to-open-item cash application.
@@ -73,6 +73,7 @@ Run verification:
 ```powershell
 python -m pytest
 python evaluation\run_evaluation.py
+python evaluation\run_rag_evaluation.py
 docker compose config --quiet
 ```
 
@@ -92,10 +93,10 @@ $match = Invoke-RestMethod -Method Post `
   -Uri http://localhost:8000/api/v1/match-po `
   -ContentType application/json -Body $body
 
-# 3. Post an idempotent journal
+# 3. Verify an idempotent replay. With AUTO_POST_ENABLED=true, step 2 already posted it.
 $journal = Invoke-RestMethod -Method Post `
   -Uri http://localhost:8000/api/v1/post-payment-journal `
-  -Headers @{ "Idempotency-Key" = "demo-$($ingested.invoice.id)" } `
+  -Headers @{ "Idempotency-Key" = "auto:$($ingested.invoice.id)" } `
   -ContentType application/json `
   -Body (@{ invoice_id = $ingested.invoice.id } | ConvertTo-Json)
 
@@ -103,7 +104,7 @@ $journal = Invoke-RestMethod -Method Post `
 Invoke-RestMethod "http://localhost:8000/api/v1/audit-log?entity_id=$($ingested.invoice.id)"
 ```
 
-To test an exception, ingest `evaluation/fixtures/po-1001-price-variance.json`. Reviewers can approve or reject through `POST /api/v1/exceptions/decision`. Set `REQUIRE_HUMAN_APPROVAL=true` to require approval even for a clean match.
+To test an exception, ingest `evaluation/fixtures/po-1001-price-variance.json`. Reviewers can approve or reject through `POST /api/v1/exceptions/decision`. Set `REQUIRE_HUMAN_APPROVAL=true` to require approval even for a clean match. Set `AUTO_POST_ENABLED=false` when you want matching and posting to remain two separate demo steps.
 
 ## Shared mailbox configuration
 
@@ -117,7 +118,7 @@ GRAPH_MAILBOX=ap-invoices@example.com
 GRAPH_FOLDER=Inbox
 ```
 
-Call `POST /api/v1/mailbox/poll?max_messages=10`. The adapter accepts PDF, PNG/JPEG, HTML, text, and JSON attachments. Production deployment should store the client secret in a secret manager and replace polling with a Graph subscription or queue-triggered worker.
+The Compose service explicitly passes these values into the API container. Call `POST /api/v1/mailbox/poll?max_messages=10`. The adapter accepts PDF, PNG/JPEG, HTML, text, and JSON attachments. Production deployment should store the client secret in a secret manager and replace polling with a Graph subscription or queue-triggered worker.
 
 ## Configuration
 
@@ -125,7 +126,7 @@ Call `POST /api/v1/mailbox/poll?max_messages=10`. The adapter accepts PDF, PNG/J
 |---|---:|---|
 | `MATCH_PRICE_TOLERANCE_PCT` | `2.0` | Maximum unit-price variance |
 | `MATCH_QUANTITY_TOLERANCE_PCT` | `0.0` | Maximum ordered-quantity variance |
-| `MATCH_TOTAL_TOLERANCE_PCT` | `2.0` | Maximum invoice-total variance |
+| `MATCH_TOTAL_TOLERANCE_PCT` | `2.0` | Maximum goods-subtotal variance against the PO |
 | `REQUIRE_HUMAN_APPROVAL` | `false` | Require explicit approval before every posting |
 | `AUTO_POST_ENABLED` | `true` | Deployment policy flag for automatic posting |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Local model used by optional AI extensions |
@@ -146,7 +147,7 @@ For SAP, Oracle, or NetSuite, implement the same interface, map external IDs int
 
 ## Evaluation results
 
-The checked-in benchmark has six synthetic documents across JSON, PDF, and scan-like PNG: clean matches plus price-variance and missing-PO exceptions. The current reproducible results are:
+The checked-in document benchmark has seven synthetic documents across JSON, PDF, scan-like PNG, and HTML. One HTML case is explicitly forced through Docling, so the mandatory processor is exercised rather than merely importable. A separate four-query labeled policy set runs RAGAS non-LLM retrieval metrics over the real LlamaIndex path.
 
 | Metric | Result |
 |---|---:|
@@ -154,9 +155,12 @@ The checked-in benchmark has six synthetic documents across JSON, PDF, and scan-
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
 | Exception-routing recall | 100.00% |
-| Straight-through-processing rate | 50.00% |
+| Evaluation coverage | 100.00% |
+| Straight-through-processing rate | 57.14% |
 | False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
+| RAGAS context precision | 100.00% |
+| RAGAS context recall | 100.00% |
 
 These numbers validate controlled behavior, not production generalization. A production pilot must use representative, permissioned invoices and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
 
@@ -166,7 +170,7 @@ These numbers validate controlled behavior, not production generalization. A pro
 - Uploads are size-limited; mailbox attachments are allow-listed by extension.
 - Deterministic duplicate detection and hash-chained audit events support duplicate and tamper controls.
 - Posting requires a successful deterministic match and is idempotent.
-- Human decisions require an actor and comment and become audit events.
+- Human decisions require a supplied actor and comment and become audit events. The actor is not authenticated in this prototype; production requires SSO/RBAC and segregation of duties.
 - No credentials are committed; `.env` is ignored.
 
 This remains a prototype. Before production: add malware scanning, object-store encryption, row-level authorization, SSO/RBAC, secret-manager integration, queue-based workers, retention policies, PII redaction, database migrations, ERP-specific reconciliation, model/red-team evaluation, and disaster recovery. See [docs/security-and-controls.md](docs/security-and-controls.md).

@@ -9,6 +9,7 @@ data/uploads/*
 evaluation/results/*.json
 !evaluation/results/.gitkeep
 !evaluation/results/latest.json
+!evaluation/results/rag-latest.json
 dist/
 .deck-build/
 *.inspect.ndjson

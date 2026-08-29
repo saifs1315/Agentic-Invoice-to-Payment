@@ -40,3 +40,30 @@ class MatchingTests(TestCase):
         result = match_invoice(invoice(), None)
         self.assertEqual("MISSING_PO", result.variances[0].code)
 
+    def test_partial_invoice_matches_invoiced_subset(self):
+        result = match_invoice(invoice(quantity="5"), self.po)
+        self.assertTrue(result.matched)
+        self.assertEqual([], result.variances)
+
+    def test_tax_is_reconciled_separately_from_goods(self):
+        inv = invoice()
+        inv.subtotal = Decimal("1000.00")
+        inv.tax_amount = Decimal("80.00")
+        inv.total = Decimal("1080.00")
+        result = match_invoice(inv, self.po)
+        self.assertTrue(result.matched)
+
+    def test_inconsistent_line_arithmetic_is_blocked(self):
+        inv = invoice()
+        inv.lines[0].amount = Decimal("9999.00")
+        inv.total = Decimal("9999.00")
+        result = match_invoice(inv, self.po)
+        self.assertFalse(result.matched)
+        self.assertIn("LINE_AMOUNT_MISMATCH", {variance.code for variance in result.variances})
+
+    def test_invoice_total_reconciliation_is_blocking(self):
+        inv = invoice()
+        inv.total = Decimal("1001.00")
+        result = match_invoice(inv, self.po)
+        self.assertFalse(result.matched)
+        self.assertIn("INVOICE_TOTAL_MISMATCH", {variance.code for variance in result.variances})

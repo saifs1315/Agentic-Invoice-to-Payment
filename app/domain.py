@@ -21,6 +21,7 @@ class Status(StrEnum):
     EXTRACTED = "extracted"
     MATCHED = "matched"
     EXCEPTION = "exception"
+    AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
     REJECTED = "rejected"
     POSTED = "posted"
@@ -52,11 +53,25 @@ class Invoice:
     status: Status = Status.RECEIVED
     confidence: float = 0.0
     evidence: dict[str, str] = field(default_factory=dict)
+    subtotal: Decimal | None = None
+    tax_amount: Decimal = Decimal("0")
+    freight_amount: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
+    extraction_mode: str = "unknown"
+    extraction_attempts: list[dict[str, str]] = field(default_factory=list)
     created_at: str = field(default_factory=now_iso)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data.update(invoice_date=self.invoice_date.isoformat(), total=str(self.total), status=self.status.value)
+        data.update(
+            invoice_date=self.invoice_date.isoformat(),
+            total=str(self.total),
+            subtotal=str(self.subtotal) if self.subtotal is not None else None,
+            tax_amount=str(self.tax_amount),
+            freight_amount=str(self.freight_amount),
+            discount_amount=str(self.discount_amount),
+            status=self.status.value,
+        )
         data["lines"] = [line.to_dict() for line in self.lines]
         return data
 
@@ -123,4 +138,3 @@ class Remittance:
 
     def to_dict(self) -> dict[str, Any]:
         return {**asdict(self), "amount": str(self.amount), "status": self.status.value}
-

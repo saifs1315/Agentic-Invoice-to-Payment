@@ -6,6 +6,7 @@ from app.audit import AuditLedger
 from app.config import Settings
 from app.erp import MockERP
 from app.extraction import extract_invoice
+from app.domain import Status
 from app.repository import MemoryRepository
 from app.workflow import InvoiceWorkflow
 
@@ -37,3 +38,20 @@ class WorkflowTests(TestCase):
         self.workflow.ingest(duplicate)
         result = self.workflow.match(duplicate.id)["result"]
         self.assertIn("DUPLICATE_INVOICE", {v["code"] for v in result["variances"]})
+
+    def test_human_approval_gate_blocks_posting_until_approved(self):
+        workflow = InvoiceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(require_human_approval=True, auto_post_enabled=True),
+        )
+        workflow.ingest(self.invoice)
+        matched = workflow.match(self.invoice.id)
+        self.assertEqual("human-review", matched["next_action"])
+        self.assertEqual(Status.AWAITING_APPROVAL, self.invoice.status)
+        with self.assertRaises(ValueError):
+            workflow.post(self.invoice.id, "approval-required")
+        workflow.approve(self.invoice.id, "reviewer:test", True, "Validated against evidence")
+        journal = workflow.post(self.invoice.id, "approval-required")
+        self.assertEqual("posted", journal["status"])

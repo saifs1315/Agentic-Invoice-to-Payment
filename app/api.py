@@ -47,10 +47,23 @@ async def ingest_invoice(file: UploadFile = File(...)) -> dict[str, Any]:
     if len(content) > settings.max_upload_mb * 1024 * 1024:
         raise HTTPException(413, "attachment exceeds configured maximum")
     source_hash = hashlib.sha256(content).hexdigest()
+    source_ref = f"sha256:{source_hash}"
+    repo.save_source_document(
+        source_ref,
+        file.content_type or "application/octet-stream",
+        source_hash,
+    )
     try:
-        invoice = extract_invoice(content, file.filename or "invoice.bin", f"sha256:{source_hash}")
+        invoice = extract_invoice(content, file.filename or "invoice.bin", source_ref)
         return workflow.ingest(invoice)
     except (ValueError, json.JSONDecodeError) as exc:
+        audit.append(
+            "source_document",
+            source_ref,
+            "extraction_failed",
+            "agent:extractor",
+            {"filename": file.filename or "invoice.bin", "reason": str(exc)},
+        )
         raise HTTPException(422, str(exc)) from exc
 
 
@@ -75,13 +88,19 @@ def post_payment_journal(request: PostRequest, idempotency_key: str = Header(...
 def exception_decision(request: DecisionRequest) -> dict[str, Any]:
     if repo.get_invoice(request.invoice_id) is None:
         raise HTTPException(404, "invoice not found")
-    return workflow.approve(request.invoice_id, request.actor, request.approved, request.comment)
+    try:
+        return workflow.approve(request.invoice_id, request.actor, request.approved, request.comment)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/api/v1/exceptions", tags=["Human oversight"])
 def list_exceptions() -> list[dict[str, Any]]:
     response = []
-    for invoice in repo.list_invoices(Status.EXCEPTION):
+    reviewable = repo.list_invoices(Status.EXCEPTION) + repo.list_invoices(
+        Status.AWAITING_APPROVAL
+    )
+    for invoice in reviewable:
         latest_match = repo.latest_match(invoice.id)
         response.append(
             {
@@ -129,7 +148,10 @@ def poll_mailbox(max_messages: int = Query(10, ge=1, le=100)) -> dict[str, Any]:
         for message in messages:
             for attachment in message.attachments:
                 try:
-                    invoice = extract_invoice(attachment.content, attachment.filename, f"graph:{message.message_id}:{attachment.filename}")
+                    source_hash = hashlib.sha256(attachment.content).hexdigest()
+                    source_ref = f"graph:{message.message_id}:{attachment.filename}"
+                    repo.save_source_document(source_ref, attachment.content_type, source_hash)
+                    invoice = extract_invoice(attachment.content, attachment.filename, source_ref)
                     accepted.append(workflow.ingest(invoice)["invoice"]["id"])
                 except ValueError as exc:
                     audit.append("email", message.message_id, "attachment_rejected", "agent:ingestor", {"filename": attachment.filename, "reason": str(exc)})

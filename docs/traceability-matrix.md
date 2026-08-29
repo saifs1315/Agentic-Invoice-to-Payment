@@ -2,9 +2,9 @@
 
 | Assignment requirement | Implementation evidence |
 |---|---|
-| Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/extraction.py`, `/api/v1/mailbox/poll` |
-| Contextual agentic workflow | `app/workflow.py` executable LangGraph branches; durable `workflow_runs`; `app/context.py` LlamaIndex documents + pgvector retrieval |
-| 2-way / 3-way matching | `app/matching.py`, configurable tolerances in `app/config.py` |
+| Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/extraction.py`, `/api/v1/mailbox/poll`; Compose passes `GRAPH_*` credentials into the API |
+| Contextual agentic workflow | `app/workflow.py` executable LangGraph branches; durable `workflow_runs`; `app/context.py` real LlamaIndex `VectorStoreIndex` fused with pgvector/repository ranking |
+| 2-way / 3-way matching | `app/matching.py`, configurable tolerances, partial quantities, tax/freight/discount reconciliation, and blocking arithmetic controls |
 | Exception routing | variance codes, exception status, `/api/v1/exceptions`, decision endpoint, `/review` |
 | Payment Journal posting | `app/erp.py`, `/api/v1/post-payment-journal`, idempotency header |
 | AR remittance matching | `extract_remittance`, `/api/v1/ingest-remittance`, `MockERP.apply_cash` |
@@ -12,7 +12,7 @@
 | PostgreSQL + pgvector | `db/schema.sql`, Compose `pgvector/pgvector:pg16` service |
 | Ollama | pinned Compose service and configuration; optional local model profile |
 | Arize Phoenix | Compose service and `app/observability.py` registration |
-| RAGAS + extraction metrics | optional eval dependency; metric rationale and plan in evaluation report |
+| RAGAS + extraction metrics | `evaluation/run_rag_evaluation.py` executes labeled RAGAS context precision/recall; `run_evaluation.py` covers seven documents and fails closed on document errors |
 | Mandatory five APIs | `app/api.py` and `openapi/openapi.yaml` |
 | Docker Compose | `Dockerfile`, `docker-compose.yml`, `.env.example` |
 | README and deployment | root `README.md` |

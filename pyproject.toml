@@ -20,6 +20,9 @@ dependencies = [
   "llama-index-llms-ollama==0.7.1",
   "docling==2.48.0",
   "docling-core[chunking]==2.74.0",
+  "easyocr==1.7.2",
+  "pypdfium2==4.30.0",
+  "ollama==0.6.2",
   "transformers==4.57.6",
   "arize-phoenix-otel==0.13.1",
   "openinference-instrumentation-langchain==0.1.51",
@@ -31,7 +34,16 @@ dev = [
   "pytest-cov==6.2.1",
   "ruff==0.12.9",
 ]
-eval = ["ragas==0.3.2", "datasets==4.0.0"]
+eval = [
+  "ragas==0.3.2",
+  "datasets==4.0.0",
+  "langchain==0.3.27",
+  "langchain-community==0.3.29",
+  "langchain-openai==0.3.32",
+  "rapidfuzz==3.14.5",
+  "pillow==11.3.0",
+  "reportlab==4.4.3",
+]
 
 
 [tool.hatch.build.targets.wheel]

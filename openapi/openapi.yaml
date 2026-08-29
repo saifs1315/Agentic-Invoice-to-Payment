@@ -125,7 +125,7 @@ paths:
           description: Exception queue
           content:
             application/json:
-              schema: {type: array, items: {$ref: "#/components/schemas/Invoice"}}
+              schema: {type: array, items: {$ref: "#/components/schemas/ExceptionInvoice"}}
   /api/v1/exceptions/decision:
     post:
       tags: [Human oversight]
@@ -137,6 +137,7 @@ paths:
             schema: {$ref: "#/components/schemas/DecisionRequest"}
       responses:
         "200": {description: Decision recorded}
+        "409": {description: Invoice is not awaiting a human decision}
         "404": {description: Invoice not found}
   /api/v1/ingest-remittance:
     post:
@@ -185,6 +186,16 @@ components:
         status: {type: string}
         confidence: {type: number, minimum: 0, maximum: 1}
         evidence: {type: object, additionalProperties: {type: string}}
+        subtotal: {type: [string, "null"]}
+        tax_amount: {type: string}
+        freight_amount: {type: string}
+        discount_amount: {type: string}
+        extraction_mode: {type: string}
+        extraction_attempts:
+          type: array
+          items:
+            type: object
+            additionalProperties: {type: string}
         created_at: {type: string, format: date-time}
     IngestResponse:
       type: object
@@ -192,6 +203,15 @@ components:
       properties:
         invoice: {$ref: "#/components/schemas/Invoice"}
         next_action: {type: string}
+    ExceptionInvoice:
+      allOf:
+        - {$ref: "#/components/schemas/Invoice"}
+        - type: object
+          properties:
+            match:
+              oneOf:
+                - {$ref: "#/components/schemas/MatchResult"}
+                - {type: "null"}
     MatchRequest:
       type: object
       required: [invoice_id]
@@ -226,6 +246,12 @@ components:
       properties:
         result: {$ref: "#/components/schemas/MatchResult"}
         next_action: {type: string}
+        journal:
+          oneOf:
+            - {$ref: "#/components/schemas/Journal"}
+            - {type: "null"}
+        policies: {type: array, items: {type: string}}
+        explanation: {type: string}
     PostRequest:
       type: object
       required: [invoice_id]

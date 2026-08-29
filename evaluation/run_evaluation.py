@@ -43,6 +43,7 @@ def evaluate() -> dict:
         lambda: {"documents": 0, "field_hits": 0, "field_total": 0, "decision_hits": 0}
     )
     failures: list[dict[str, str]] = []
+    extraction_modes: dict[str, int] = defaultdict(int)
 
     for item in dataset:
         path = ROOT / item["file"]
@@ -57,10 +58,21 @@ def evaluate() -> dict:
         repo, audit, erp = MemoryRepository(), AuditLedger(), MockERP()
         workflow = InvoiceWorkflow(repo, audit, erp, Settings())
         try:
-            invoice = extract_invoice(path.read_bytes(), path.name, f"fixture:{path.name}")
+            invoice = extract_invoice(
+                path.read_bytes(),
+                path.name,
+                f"fixture:{path.name}",
+                processor=item.get("processor", "auto"),
+            )
             workflow.ingest(invoice)
             actual = invoice.to_dict()
             confidences.append(invoice.confidence)
+            extraction_modes[invoice.extraction_mode] += 1
+            expected_mode = item.get("expected_extraction_mode")
+            if expected_mode and invoice.extraction_mode != expected_mode:
+                raise ValueError(
+                    f"expected extraction mode {expected_mode}, got {invoice.extraction_mode}"
+                )
             for field, expected in item["expected_fields"].items():
                 hit = actual.get(field) == expected
                 field_hits += hit
@@ -81,6 +93,7 @@ def evaluate() -> dict:
             false_auto_posts += (not item["expected_match"]) and outcome["next_action"] == "posted"
             audit_valid += audit.verify()
         except Exception as exc:
+            confidences.append(0.0)
             failures.append({"file": item["file"], "error": f"{type(exc).__name__}: {exc}"})
 
     count = len(dataset)
@@ -96,19 +109,24 @@ def evaluate() -> dict:
     }
     metrics = {
         "dataset_size": count,
+        "evaluation_coverage": round((count - len(failures)) / count, 4),
+        "extraction_modes": dict(sorted(extraction_modes.items())),
         "formats": format_metrics,
         "field_level_extraction_accuracy": round(field_hits / field_total, 4),
         "document_exact_match_rate": round(match_hits / count, 4),
         "exception_classification_accuracy": round(exception_hits / count, 4),
-        "exception_routing_recall": round(exception_routed / exception_cases, 4),
+        "exception_routing_recall": (
+            round(exception_routed / exception_cases, 4) if exception_cases else 1.0
+        ),
         "straight_through_processing_rate": round(posted / count, 4),
         "false_auto_post_rate": round(false_auto_posts / count, 4),
-        "mean_extraction_confidence": round(sum(confidences) / len(confidences), 4) if confidences else 0.0,
+        "mean_extraction_confidence": round(sum(confidences) / count, 4),
         "audit_chain_integrity_rate": round(audit_valid / count, 4),
         "failed_documents": failures,
         "notes": (
-            "Synthetic six-document benchmark spanning JSON, text-native PDF, and scan-like PNG. "
-            "Finance decisions remain deterministic; production validation requires permissioned vendor samples."
+            "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, "
+            "and a forced-Docling HTML case. Finance decisions remain deterministic; production "
+            "validation requires permissioned vendor samples."
         ),
     }
     output = ROOT / "results" / "latest.json"
@@ -118,4 +136,7 @@ def evaluate() -> dict:
 
 
 if __name__ == "__main__":
-    print(json.dumps(evaluate(), indent=2))
+    result = evaluate()
+    print(json.dumps(result, indent=2))
+    if result["failed_documents"]:
+        raise SystemExit(1)

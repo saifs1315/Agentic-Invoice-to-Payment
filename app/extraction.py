@@ -21,7 +21,11 @@ FIELD_PATTERNS = {
     "invoice_date": r"(?:invoice[_ ]date|date)\s*[:#]\s*(?:\|\s*)?(\d{4}-\d{2}-\d{2})",
     "po_number": r"(?:po|purchase[_ ]order)(?:[_ ](?:number|no))?\s*[:#]\s*(?:\|\s*)?([A-Za-z0-9_-]+)",
     "currency": r"currency\s*[:#]\s*(?:\|\s*)?([A-Z]{3})",
-    "total": r"(?:invoice[_ ]total|total)\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "total": r"(?:invoice[_ ]total|\btotal)\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "subtotal": r"subtotal\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "tax_amount": r"(?:tax|tax[_ ]amount)\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "freight_amount": r"(?:freight|shipping)\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "discount_amount": r"discount\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
 }
 
 LINE_PATTERN = re.compile(
@@ -48,6 +52,10 @@ class InvoicePayload(BaseModel):
     invoice_date: date
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     total: Decimal = Field(gt=0)
+    subtotal: Decimal | None = Field(default=None, ge=0)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    freight_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
     po_number: str | None = None
     lines: list[InvoiceLinePayload] = Field(default_factory=list)
 
@@ -57,14 +65,41 @@ class InvoicePayload(BaseModel):
         return str(value).upper()
 
 
-def _text_from_payload(content: bytes, filename: str) -> tuple[str, str]:
+def _docling_text(content: bytes, filename: str) -> str:
+    from docling.document_converter import DocumentConverter
+
+    suffix = Path(filename).suffix or ".bin"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
+        temporary.write(content)
+        temporary.flush()
+        result = DocumentConverter().convert(temporary.name)
+        return result.document.export_to_markdown()
+
+
+def _text_from_payload(
+    content: bytes,
+    filename: str,
+    processor: str = "auto",
+) -> tuple[str, str, list[dict[str, str]]]:
+    attempts: list[dict[str, str]] = []
     lower = filename.lower()
     if lower.endswith(".json"):
-        return content.decode("utf-8"), "json"
+        return content.decode("utf-8"), "json", [{"backend": "json", "outcome": "success"}]
+    if processor == "docling":
+        try:
+            text = _docling_text(content, filename)
+            attempts.append({"backend": "docling", "outcome": "success"})
+            return text, "docling", attempts
+        except Exception as exc:
+            attempts.append(
+                {"backend": "docling", "outcome": "failed", "reason": type(exc).__name__}
+            )
     if lower.endswith((".txt", ".html", ".htm", ".eml")):
         text = content.decode("utf-8", errors="replace")
         text = unescape(re.sub(r"<[^>]+>", " ", text))
-        return re.sub(r"\s+", " ", text), "text"
+        mode = "html-text" if lower.endswith((".html", ".htm")) else "text"
+        attempts.append({"backend": mode, "outcome": "success"})
+        return re.sub(r"\s+", " ", text), mode, attempts
     if lower.endswith(".pdf"):
         try:
             import pypdfium2
@@ -76,9 +111,13 @@ def _text_from_payload(content: bytes, filename: str) -> tuple[str, str]:
                 pages.append(text_page.get_text_range())
             extracted = "\n".join(pages).strip()
             if extracted:
-                return extracted, "pdf-text"
-        except Exception:
-            pass
+                attempts.append({"backend": "pdf-text", "outcome": "success"})
+                return extracted, "pdf-text", attempts
+            attempts.append({"backend": "pdf-text", "outcome": "empty"})
+        except Exception as exc:
+            attempts.append(
+                {"backend": "pdf-text", "outcome": "failed", "reason": type(exc).__name__}
+            )
     if lower.endswith((".png", ".jpg", ".jpeg", ".tif", ".tiff")):
         try:
             import easyocr
@@ -88,20 +127,22 @@ def _text_from_payload(content: bytes, filename: str) -> tuple[str, str]:
                 temporary.write(content)
                 temporary.flush()
                 reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-                return "\n".join(reader.readtext(temporary.name, detail=0)), "easyocr"
-        except Exception:
-            pass
+                attempts.append({"backend": "easyocr", "outcome": "success"})
+                return "\n".join(reader.readtext(temporary.name, detail=0)), "easyocr", attempts
+        except Exception as exc:
+            attempts.append(
+                {"backend": "easyocr", "outcome": "failed", "reason": type(exc).__name__}
+            )
     try:
-        from docling.document_converter import DocumentConverter
-
-        suffix = Path(filename).suffix or ".bin"
-        with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
-            temporary.write(content)
-            temporary.flush()
-            result = DocumentConverter().convert(temporary.name)
-            return result.document.export_to_markdown(), "docling"
-    except Exception:
-        return content.decode("utf-8", errors="replace"), "fallback"
+        text = _docling_text(content, filename)
+        attempts.append({"backend": "docling", "outcome": "success"})
+        return text, "docling", attempts
+    except Exception as exc:
+        attempts.append(
+            {"backend": "docling", "outcome": "failed", "reason": type(exc).__name__}
+        )
+        attempts.append({"backend": "fallback", "outcome": "success"})
+        return content.decode("utf-8", errors="replace"), "fallback", attempts
 
 
 def _ollama_extract(text: str) -> dict[str, Any]:
@@ -125,8 +166,13 @@ def _ollama_extract(text: str) -> dict[str, Any]:
     return json.loads(content)
 
 
-def extract_invoice(content: bytes, filename: str, source_ref: str) -> Invoice:
-    text, mode = _text_from_payload(content, filename)
+def extract_invoice(
+    content: bytes,
+    filename: str,
+    source_ref: str,
+    processor: str = "auto",
+) -> Invoice:
+    text, mode, attempts = _text_from_payload(content, filename, processor)
     if mode == "json":
         data: dict[str, Any] = json.loads(text)
     else:
@@ -135,13 +181,21 @@ def extract_invoice(content: bytes, filename: str, source_ref: str) -> Invoice:
             try:
                 data = _ollama_extract(text)
                 mode = "ollama"
-            except Exception:
+                attempts.append({"backend": "ollama", "outcome": "success"})
+            except Exception as exc:
+                attempts.append(
+                    {"backend": "ollama", "outcome": "failed", "reason": type(exc).__name__}
+                )
                 data = {}
         if not data:
             for field, pattern in FIELD_PATTERNS.items():
                 match = re.search(pattern, text, re.IGNORECASE)
                 data[field] = match.group(1) if match else None
             data["lines"] = [match.groupdict() for match in LINE_PATTERN.finditer(text)]
+
+    for optional_amount in ("subtotal", "tax_amount", "freight_amount", "discount_amount"):
+        if data.get(optional_amount) is None:
+            data.pop(optional_amount, None)
 
     required = ["vendor_id", "invoice_number", "invoice_date", "currency", "total"]
     missing = [field for field in required if not data.get(field)]
@@ -178,16 +232,22 @@ def extract_invoice(content: bytes, filename: str, source_ref: str) -> Invoice:
         "easyocr": 0.80,
     }.get(mode, 0.75)
     return Invoice(
-        payload.vendor_id,
-        payload.invoice_number,
-        payload.invoice_date,
-        payload.currency,
-        payload.total,
-        payload.po_number,
-        lines,
-        source_ref,
+        vendor_id=payload.vendor_id,
+        invoice_number=payload.invoice_number,
+        invoice_date=payload.invoice_date,
+        currency=payload.currency,
+        total=payload.total,
+        po_number=payload.po_number,
+        lines=lines,
+        source_ref=source_ref,
         confidence=confidence,
         evidence=evidence,
+        subtotal=payload.subtotal,
+        tax_amount=payload.tax_amount,
+        freight_amount=payload.freight_amount,
+        discount_amount=payload.discount_amount,
+        extraction_mode=mode,
+        extraction_attempts=attempts,
     )
 
 

@@ -1,0 +1,52 @@
+{
+  "dataset_size": 4,
+  "ragas_non_llm_context_precision": 1.0,
+  "ragas_non_llm_context_recall": 1.0,
+  "cases": [
+    {
+      "query": "Can a vendor invoice number be posted twice?",
+      "retrieved_context_ids": [
+        "policy-2"
+      ],
+      "reference_context_ids": [
+        "policy-2"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "query": "What quantity rule applies to a three-way match and goods received?",
+      "retrieved_context_ids": [
+        "policy-3"
+      ],
+      "reference_context_ids": [
+        "policy-3"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "query": "Must posting be approved, matched, and idempotent?",
+      "retrieved_context_ids": [
+        "policy-4"
+      ],
+      "reference_context_ids": [
+        "policy-4"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "query": "What happens when an invoice has no purchase order?",
+      "retrieved_context_ids": [
+        "policy-1"
+      ],
+      "reference_context_ids": [
+        "policy-1"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    }
+  ],
+  "notes": "Offline RAGAS non-LLM context precision and recall over labeled finance policies; no external LLM or embedding API is used."
+}

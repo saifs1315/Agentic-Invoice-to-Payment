@@ -87,6 +87,10 @@ class InvoiceWorkflow:
 
     def _graph_finalize(self, state: WorkflowState) -> WorkflowState:
         matched = bool(state["result"]["matched"])
+        if matched and self.config.require_human_approval:
+            invoice = self._invoice_or_raise(state["invoice_id"])
+            invoice.status = Status.AWAITING_APPROVAL
+            self.repo.save_invoice(invoice)
         next_action = (
             "post-payment-journal"
             if matched and not self.config.require_human_approval
@@ -114,6 +118,8 @@ class InvoiceWorkflow:
                 "source_ref": invoice.source_ref,
                 "confidence": invoice.confidence,
                 "evidence": invoice.evidence,
+                "extraction_mode": invoice.extraction_mode,
+                "extraction_attempts": invoice.extraction_attempts,
             },
         )
         state: WorkflowState = {"invoice_id": invoice.id, "next_action": "match-po"}
@@ -188,6 +194,8 @@ class InvoiceWorkflow:
 
     def approve(self, invoice_id: str, actor: str, approved: bool, comment: str) -> dict[str, Any]:
         invoice = self._invoice_or_raise(invoice_id)
+        if invoice.status not in {Status.EXCEPTION, Status.AWAITING_APPROVAL}:
+            raise ValueError(f"invoice in status {invoice.status.value} is not awaiting a decision")
         invoice.status = Status.APPROVED if approved else Status.REJECTED
         self.repo.save_invoice(invoice)
         self.audit.append(

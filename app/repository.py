@@ -8,6 +8,7 @@ from datetime import date
 from decimal import Decimal
 from threading import RLock
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from app.domain import Invoice, InvoiceLine, MatchResult, PurchaseOrder, Remittance, Status, Variance
 
@@ -55,6 +56,14 @@ def _invoice_from_dict(data: dict[str, Any]) -> Invoice:
         status=Status(str(data["status"])),
         confidence=float(data.get("confidence", 0.0)),
         evidence=dict(data.get("evidence", {})),
+        subtotal=(
+            Decimal(str(data["subtotal"])) if data.get("subtotal") is not None else None
+        ),
+        tax_amount=Decimal(str(data.get("tax_amount", "0"))),
+        freight_amount=Decimal(str(data.get("freight_amount", "0"))),
+        discount_amount=Decimal(str(data.get("discount_amount", "0"))),
+        extraction_mode=str(data.get("extraction_mode", "unknown")),
+        extraction_attempts=list(data.get("extraction_attempts", [])),
         created_at=str(data.get("created_at", "")),
     )
 
@@ -72,6 +81,7 @@ class MemoryRepository:
         self.open_ar_items: dict[str, dict[str, Any]] = {}
         self.idempotency: dict[str, dict[str, Any]] = {}
         self.workflow_states: dict[str, dict[str, Any]] = {}
+        self.source_documents: dict[str, dict[str, str]] = {}
         self.policies = list(POLICIES)
         self._lock = RLock()
 
@@ -79,6 +89,19 @@ class MemoryRepository:
         with self._lock:
             self.invoices[invoice.id] = invoice
             return invoice
+
+    def save_source_document(
+        self,
+        source_ref: str,
+        media_type: str,
+        content_sha256: str,
+    ) -> None:
+        with self._lock:
+            self.source_documents[source_ref] = {
+                "source_ref": source_ref,
+                "media_type": media_type,
+                "content_sha256": content_sha256,
+            }
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         return self.invoices.get(invoice_id)
@@ -190,6 +213,22 @@ class PostgresRepository(MemoryRepository):
                 ),
             )
         return saved
+
+    def save_source_document(
+        self,
+        source_ref: str,
+        media_type: str,
+        content_sha256: str,
+    ) -> None:
+        super().save_source_document(source_ref, media_type, content_sha256)
+        with self.pool.connection() as conn:
+            conn.execute(
+                """INSERT INTO source_documents (id,source_ref,media_type,content_sha256)
+                VALUES (%s,%s,%s,%s)
+                ON CONFLICT (source_ref) DO UPDATE SET media_type=EXCLUDED.media_type,
+                content_sha256=EXCLUDED.content_sha256""",
+                (uuid5(NAMESPACE_URL, source_ref), source_ref, media_type, content_sha256),
+            )
 
     def get_invoice(self, invoice_id: str) -> Invoice | None:
         local = super().get_invoice(invoice_id)

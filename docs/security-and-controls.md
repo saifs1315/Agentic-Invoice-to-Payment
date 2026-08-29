@@ -6,12 +6,15 @@
 - Upload size and mailbox extension allow-lists reduce malformed-input exposure.
 - Duplicate vendor/invoice numbers are blocked.
 - Numeric matching is deterministic and tolerance values are explicit configuration.
+- Line amounts must equal quantity multiplied by unit price; subtotal and final total must reconcile with tax, freight, and discounts.
 - Three-way matching prevents invoiced quantity from exceeding goods received.
 - Posting requires a successful match and, when configured, a named human approval.
 - ERP posting is idempotent.
 - Audit events are append-only in the application and hash-chained.
 - Secrets are supplied through environment variables; `.env` is excluded from Git.
 - The API container runs as non-root, read-only, and without privilege escalation.
+
+Prototype identity limitation: the review API records the supplied actor and comment, but does not authenticate that actor. This is useful decision provenance for a local demonstration, not an authorization control. Production requires SSO/OIDC, RBAC, approval limits, and segregation of duties before any money-moving endpoint is exposed.
 
 ## Required before production
 
@@ -31,9 +34,8 @@
 - Vendor changes bank details inside invoice text.
 - PDF includes instructions intended to override the agent.
 - Same invoice arrives through multiple emails or file names.
-- Invoice total and line totals disagree.
+- Invoice total and line totals disagree. Covered by blocking `LINE_AMOUNT_MISMATCH`, `SUBTOTAL_MISMATCH`, and `INVOICE_TOTAL_MISMATCH` controls.
 - Currency symbol conflicts with the extracted currency code.
 - Invoice contains a PO belonging to another vendor.
 - Journal request is replayed after a timeout.
 - Human approver attempts to approve and post outside their role or limit.
-

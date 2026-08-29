@@ -37,7 +37,7 @@ class RemittanceRequest(BaseModel):
     customer_id: str
     reference: str
     amount: Decimal = Field(gt=0, le=settings.max_monetary_amount)
-    currency: str = "USD"
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     open_item_refs: list[str]
     source_ref: str = "api"
 
@@ -122,7 +122,12 @@ def workflow_status(invoice_id: str) -> dict[str, Any]:
 @app.post("/api/v1/ingest-remittance", status_code=202, tags=["AR"])
 def ingest_remittance(request: RemittanceRequest) -> dict[str, Any]:
     remittance = extract_remittance(request.model_dump(), request.source_ref)
-    result = erp.apply_cash(remittance.customer_id, remittance.amount, remittance.open_item_refs)
+    result = erp.apply_cash(
+        remittance.customer_id,
+        remittance.amount,
+        remittance.currency,
+        remittance.open_item_refs,
+    )
     remittance.status = Status.POSTED if result["applied"] else Status.EXCEPTION
     repo.save_remittance(remittance, result)
     audit.append("remittance", remittance.id, "cash_application_completed", "agent:ar-matcher", result)

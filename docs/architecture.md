@@ -23,7 +23,7 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 ## AR sequence
 
-The scoped AR path accepts structured remittance data, maps the customer and amount to referenced open items, applies exact allocations, persists the result, and records the outcome in the audit ledger. Missing references, customer mismatches, partial payments, overpayments, or already-closed items become exceptions visible at `/api/v1/remittance-exceptions`. It deliberately does not reuse the invoice document-extraction pipeline, LangGraph workflow, or AP approval override.
+The scoped AR path accepts structured remittance data, maps the customer, currency, and amount to referenced open items, applies exact allocations, persists the result, and records the outcome in the audit ledger. Missing references, customer or currency mismatches, partial payments, overpayments, or already-closed items become exceptions visible at `/api/v1/remittance-exceptions`. It deliberately does not reuse the invoice document-extraction pipeline, LangGraph workflow, or AP approval override.
 
 ## Failure and retry behavior
 

@@ -113,7 +113,7 @@ To test an exception, ingest `evaluation/fixtures/po-1001-price-variance.json`. 
 | Code | Meaning |
 |---|---|
 | `AMOUNT_OUT_OF_RANGE` | A monetary value exceeds the configured prototype ceiling or is negative. |
-| `QUANTITY_OUT_OF_RANGE` | A quantity exceeds the prototype ceiling or is negative. |
+| `QUANTITY_OUT_OF_RANGE` | A quantity exceeds the prototype ceiling or is zero or negative. |
 | `LINE_DETAIL_MISSING` | The invoice has no line-level detail for PO matching. |
 | `LINE_AMOUNT_MISMATCH` | A line amount does not equal quantity multiplied by unit price. |
 | `SUBTOTAL_MISMATCH` | The declared subtotal does not equal the sum of invoice lines. |

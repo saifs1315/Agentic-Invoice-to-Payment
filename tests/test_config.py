@@ -17,3 +17,18 @@ class SettingsTests(TestCase):
         with patch.dict(os.environ, {"MAX_MONETARY_AMOUNT": "0"}):
             with self.assertRaisesRegex(ValueError, "must be greater than zero"):
                 Settings()
+
+    def test_monetary_limit_must_be_a_finite_decimal(self):
+        invalid_values = ("abc", "NaN", "Infinity")
+
+        for invalid_value in invalid_values:
+            with self.subTest(value=invalid_value):
+                with patch.dict(
+                    os.environ,
+                    {"MAX_MONETARY_AMOUNT": invalid_value},
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "MAX_MONETARY_AMOUNT must be a valid.*decimal number",
+                    ):
+                        Settings()

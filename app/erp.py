@@ -33,12 +33,26 @@ class MockERP:
         self._posted_by_invoice[invoice.id] = journal
         return journal
 
-    def apply_cash(self, customer_id: str, amount: Decimal, item_refs: list[str]) -> dict:
+    def apply_cash(
+        self,
+        customer_id: str,
+        amount: Decimal,
+        currency: str,
+        item_refs: list[str],
+    ) -> dict:
         items = [self.open_items.get(ref) for ref in item_refs]
         if not items or any(item is None for item in items):
             return {"applied": False, "reason": "open_item_not_found"}
         if any(item["customer_id"] != customer_id or not item["open"] for item in items):
             return {"applied": False, "reason": "customer_or_status_mismatch"}
+        expected_currencies = sorted({str(item["currency"]) for item in items})
+        if any(item["currency"] != currency for item in items):
+            return {
+                "applied": False,
+                "reason": "currency_mismatch",
+                "expected": ",".join(expected_currencies),
+                "actual": currency,
+            }
         expected = sum((item["amount"] for item in items), Decimal("0"))
         if expected != amount:
             return {"applied": False, "reason": "amount_mismatch", "expected": str(expected), "actual": str(amount)}

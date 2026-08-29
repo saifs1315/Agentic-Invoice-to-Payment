@@ -150,6 +150,7 @@ paths:
             schema: {$ref: "#/components/schemas/RemittanceRequest"}
       responses:
         "202": {description: Remittance processed or routed to exception}
+        "422": {description: Remittance validation failed}
   /api/v1/remittance-exceptions:
     get:
       tags: [AR, Human oversight]
@@ -294,8 +295,12 @@ components:
       properties:
         customer_id: {type: string}
         reference: {type: string}
-        amount: {type: string}
-        currency: {type: string, default: USD}
+        amount:
+          anyOf:
+            - {type: number, exclusiveMinimum: 0, maximum: 1000000000}
+            - {type: string, pattern: '^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$'}
+          description: Positive decimal amount bounded by the configured monetary ceiling.
+        currency: {type: string, pattern: '^[A-Z]{3}$', default: USD}
         open_item_refs: {type: array, items: {type: string}}
         source_ref: {type: string, default: api}
     RemittanceExceptionRecord:

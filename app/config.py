@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -11,7 +11,12 @@ def _bool(name: str, default: bool) -> bool:
 
 
 def _positive_decimal(name: str, default: str) -> Decimal:
-    value = Decimal(os.getenv(name, default))
+    try:
+        value = Decimal(os.getenv(name, default))
+    except InvalidOperation as exc:
+        raise ValueError(f"{name} must be a valid decimal number") from exc
+    if not value.is_finite():
+        raise ValueError(f"{name} must be a valid finite decimal number")
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero")
     return value

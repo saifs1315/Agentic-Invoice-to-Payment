@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-LedgerPilot passed all 25 automated unit, API, control, workflow, context, and audit tests and produced the expected extraction, match, exception, routing, and posting decisions on a seven-document synthetic benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. The controlled set scored 100% for evaluation coverage, labeled field extraction, match decisions, exception classification, exception routing recall, and audit-chain integrity. No ineligible invoice was auto-posted. A separate four-query policy dataset scored 100% RAGAS non-LLM context precision and recall.
+LedgerPilot passed all 27 automated unit, API, control, workflow, context, and audit tests and produced the expected extraction, match, exception, routing, and posting decisions on a seven-document synthetic benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. The controlled set scored 100% for evaluation coverage, labeled field extraction, match decisions, exception classification, exception routing recall, and audit-chain integrity. No ineligible invoice was auto-posted. A separate four-query policy dataset scored 100% RAGAS non-LLM context precision and recall.
 
 These results demonstrate implementation correctness against known fixtures. They do not estimate production accuracy across diverse vendor layouts, scans, languages, handwriting, or adversarial documents.
 
@@ -59,7 +59,7 @@ Per-format field and decision accuracy were 100% for JSON (3), PDF (2), PNG (1),
 
 ## Automated verification
 
-Twenty-five tests cover typed extraction and field evidence, cross-platform temporary files, API contracts, clean and boundary matching, partial invoices, bounded ancillary charges, configurable monetary magnitude limits, missing-line routing, line and total arithmetic, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, human approval gating, durable workflow state, idempotent posting, LlamaIndex retrieval, audit tamper detection, exact AR cash application, partial-payment escalation, AR exception visibility, and remittance amount validation.
+Twenty-seven tests cover typed extraction and field evidence, cross-platform temporary files, API contracts, clean and boundary matching, partial invoices, bounded ancillary charges, configurable monetary magnitude limits and diagnostics, missing-line routing, line and total arithmetic, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, human approval gating, durable workflow state, idempotent posting, LlamaIndex retrieval, audit tamper detection, exact AR cash application, currency and partial-payment escalation, AR exception visibility, and remittance amount validation.
 
 ## Production pilot plan
 

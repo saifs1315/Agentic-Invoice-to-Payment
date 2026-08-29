@@ -70,14 +70,14 @@ class APITests(TestCase):
         )
         self.assertEqual(422, rejected.status_code)
 
-    def test_ar_exception_is_visible_to_operators(self):
+    def test_ar_currency_exception_is_visible_to_operators(self):
         created = self.client.post(
             "/api/v1/ingest-remittance",
             json={
                 "customer_id": "CUST-001",
-                "reference": "REM-API-PARTIAL",
-                "amount": "900.00",
-                "currency": "USD",
+                "reference": "REM-API-CURRENCY-MISMATCH",
+                "amount": "1000.00",
+                "currency": "EUR",
                 "open_item_refs": ["AR-9001", "AR-9002"],
                 "source_ref": "api:test-ar-exception",
             },
@@ -92,7 +92,9 @@ class APITests(TestCase):
             for item in queue.json()
             if item["remittance"]["id"] == created.json()["remittance"]["id"]
         )
-        self.assertEqual("amount_mismatch", record["result"]["reason"])
+        self.assertEqual("currency_mismatch", record["result"]["reason"])
+        self.assertEqual("USD", record["result"]["expected"])
+        self.assertEqual("EUR", record["result"]["actual"])
 
     def test_remittance_amount_limit_is_enforced(self):
         rejected = self.client.post(

@@ -17,7 +17,7 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 2. A SHA-256 source reference is assigned before extraction.
 3. Local PDF text extraction or EasyOCR handles common inputs; Docling is the rich-layout fallback and is explicitly exercised by the evaluation suite. Optional Ollama extraction is schema-constrained. All paths retain evidence, confidence, the selected backend, and failed-backend attempt types.
 4. After typed extraction, LangGraph executes policy retrieval, deterministic matching, conditional routing, and posting. A LlamaIndex `VectorStoreIndex` and repository ranking are fused so both LlamaIndex and PostgreSQL/pgvector perform real retrieval. Each graph node saves durable workflow state.
-5. The matcher validates line arithmetic and invoice-total reconciliation, loads PO and receipt facts from the ERP adapter, and applies configured price, quantity, and goods-subtotal tolerances. Partial quantities are allowed up to the ordered/received bounds; tax, freight, and discounts are reconciled separately from PO goods value.
+5. The matcher validates line arithmetic and invoice-total reconciliation, loads PO and receipt facts from the ERP adapter, and applies configured price, quantity, goods-subtotal, and ancillary-charge limits. Partial quantities are allowed up to the ordered/received bounds; tax, freight, and discounts are reconciled separately from PO goods value but cannot exceed the configured percentage caps.
 6. Clean invoices proceed to approval policy and idempotent posting. Exceptions enter a human queue.
 7. The audit ledger records each decision and external response in a SHA-256 hash chain.
 

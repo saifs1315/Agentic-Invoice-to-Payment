@@ -62,3 +62,10 @@ class APITests(TestCase):
         self.assertEqual(200, audit.status_code)
         self.assertTrue(audit.json()["chain_valid"])
         self.assertGreaterEqual(len(audit.json()["events"]), 3)
+
+        excessive = {**payload, "invoice_number": "INV-API-EXCESSIVE", "total": "9" * 27}
+        rejected = self.client.post(
+            "/api/v1/ingest-invoice",
+            files={"file": ("invoice.json", json.dumps(excessive), "application/json")},
+        )
+        self.assertEqual(422, rejected.status_code)

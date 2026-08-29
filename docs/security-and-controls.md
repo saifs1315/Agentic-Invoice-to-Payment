@@ -7,7 +7,9 @@
 - Duplicate vendor/invoice numbers are blocked.
 - Numeric matching is deterministic and tolerance values are explicit configuration.
 - Line amounts must equal quantity multiplied by unit price; subtotal and final total must reconcile with tax, freight, and discounts.
-- Three-way matching prevents invoiced quantity from exceeding goods received.
+- Tax, freight, and discount amounts are bounded by configurable percentages of invoice subtotal; oversized amounts become blocking variances.
+- Monetary and quantity inputs have explicit prototype limits so malformed values route to a controlled validation error instead of breaking matching.
+- Three-way matching prevents invoiced quantity from exceeding goods received for the current invoice. Cumulative consumption across multiple invoices is not modeled in this prototype.
 - Posting requires a successful match and, when configured, a named human approval.
 - ERP posting is idempotent.
 - Audit events are append-only in the application and hash-chained.

@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import tempfile
+from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 from html import unescape
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
-from app.domain import Invoice, InvoiceLine, Remittance
+from app.domain import MAX_MONETARY_AMOUNT, MAX_QUANTITY, Invoice, InvoiceLine, Remittance
 
 
 FIELD_PATTERNS = {
@@ -40,9 +42,9 @@ LINE_PATTERN = re.compile(
 
 class InvoiceLinePayload(BaseModel):
     description: str = Field(min_length=1)
-    quantity: Decimal = Field(gt=0)
-    unit_price: Decimal = Field(ge=0)
-    amount: Decimal = Field(ge=0)
+    quantity: Decimal = Field(gt=0, le=MAX_QUANTITY)
+    unit_price: Decimal = Field(ge=0, le=MAX_MONETARY_AMOUNT)
+    amount: Decimal = Field(ge=0, le=MAX_MONETARY_AMOUNT)
     po_line: int | None = Field(default=None, ge=1)
 
 
@@ -51,11 +53,11 @@ class InvoicePayload(BaseModel):
     invoice_number: str = Field(min_length=1)
     invoice_date: date
     currency: str = Field(pattern=r"^[A-Z]{3}$")
-    total: Decimal = Field(gt=0)
-    subtotal: Decimal | None = Field(default=None, ge=0)
-    tax_amount: Decimal = Field(default=Decimal("0"), ge=0)
-    freight_amount: Decimal = Field(default=Decimal("0"), ge=0)
-    discount_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    total: Decimal = Field(gt=0, le=MAX_MONETARY_AMOUNT)
+    subtotal: Decimal | None = Field(default=None, ge=0, le=MAX_MONETARY_AMOUNT)
+    tax_amount: Decimal = Field(default=Decimal("0"), ge=0, le=MAX_MONETARY_AMOUNT)
+    freight_amount: Decimal = Field(default=Decimal("0"), ge=0, le=MAX_MONETARY_AMOUNT)
+    discount_amount: Decimal = Field(default=Decimal("0"), ge=0, le=MAX_MONETARY_AMOUNT)
     po_number: str | None = None
     lines: list[InvoiceLinePayload] = Field(default_factory=list)
 
@@ -65,14 +67,23 @@ class InvoicePayload(BaseModel):
         return str(value).upper()
 
 
+@contextmanager
+def _temporary_path(content: bytes, suffix: str) -> Iterator[str]:
+    descriptor, filename = tempfile.mkstemp(suffix=suffix)
+    try:
+        with os.fdopen(descriptor, "wb") as temporary:
+            temporary.write(content)
+        yield filename
+    finally:
+        Path(filename).unlink(missing_ok=True)
+
+
 def _docling_text(content: bytes, filename: str) -> str:
     from docling.document_converter import DocumentConverter
 
     suffix = Path(filename).suffix or ".bin"
-    with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
-        temporary.write(content)
-        temporary.flush()
-        result = DocumentConverter().convert(temporary.name)
+    with _temporary_path(content, suffix) as temporary_path:
+        result = DocumentConverter().convert(temporary_path)
         return result.document.export_to_markdown()
 
 
@@ -123,12 +134,11 @@ def _text_from_payload(
             import easyocr
 
             suffix = Path(filename).suffix or ".png"
-            with tempfile.NamedTemporaryFile(suffix=suffix) as temporary:
-                temporary.write(content)
-                temporary.flush()
+            with _temporary_path(content, suffix) as temporary_path:
                 reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+                extracted = "\n".join(reader.readtext(temporary_path, detail=0))
                 attempts.append({"backend": "easyocr", "outcome": "success"})
-                return "\n".join(reader.readtext(temporary.name, detail=0)), "easyocr", attempts
+                return extracted, "easyocr", attempts
         except Exception as exc:
             attempts.append(
                 {"backend": "easyocr", "outcome": "failed", "reason": type(exc).__name__}
@@ -202,16 +212,6 @@ def extract_invoice(
     if missing:
         raise ValueError(f"missing required invoice fields: {', '.join(missing)}")
 
-    if not data.get("lines"):
-        data["lines"] = [
-            {
-                "description": "Invoice total",
-                "quantity": "1",
-                "unit_price": data["total"],
-                "amount": data["total"],
-                "po_line": 1,
-            }
-        ]
     payload = InvoicePayload.model_validate(data)
     lines = [
         InvoiceLine(
@@ -223,7 +223,18 @@ def extract_invoice(
         )
         for line in payload.lines
     ]
-    evidence = {field: f"{mode}:{field}" for field in required + ["po_number"] if data.get(field)}
+    evidence_fields = required + [
+        "po_number",
+        "subtotal",
+        "tax_amount",
+        "freight_amount",
+        "discount_amount",
+    ]
+    evidence = {
+        field: f"{mode}:{field}"
+        for field in evidence_fields
+        if field in data and data[field] is not None
+    }
     confidence = {
         "json": 1.0,
         "ollama": 0.88,

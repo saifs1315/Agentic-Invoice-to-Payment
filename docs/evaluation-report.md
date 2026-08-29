@@ -59,7 +59,7 @@ Per-format field and decision accuracy were 100% for JSON (3), PDF (2), PNG (1),
 
 ## Automated verification
 
-Twenty-one tests cover typed extraction and tax fields, API contracts, clean and boundary matching, partial invoices, tax reconciliation, line and total arithmetic, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, human approval gating, durable workflow state, idempotent posting, LlamaIndex retrieval, audit tamper detection, exact AR cash application, and partial-payment escalation.
+Twenty-one tests cover typed extraction and field evidence, cross-platform temporary files, API contracts, clean and boundary matching, partial invoices, bounded ancillary charges, monetary magnitude limits, missing-line routing, line and total arithmetic, out-of-tolerance price, receipt shortfall, missing PO, duplicate detection, human approval gating, durable workflow state, idempotent posting, LlamaIndex retrieval, audit tamper detection, exact AR cash application, and partial-payment escalation.
 
 ## Production pilot plan
 

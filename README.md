@@ -10,7 +10,7 @@ The prototype intentionally separates probabilistic AI from financial controls: 
 - Typed extraction with PDF text, EasyOCR, an explicitly evaluated Docling path, optional validated Ollama JSON, evidence references, and an auditable backend-attempt trace.
 - LangGraph workflow that executes policy retrieval, deterministic matching, conditional posting, and review routing.
 - LlamaIndex `VectorStoreIndex` retrieval fused with PostgreSQL/pgvector policy ranking and an offline fallback.
-- Two-way and three-way PO/GR matching with configurable tolerances, partial-invoice support, and separate tax/freight/discount reconciliation.
+- Two-way and three-way PO/GR matching with configurable tolerances, partial-invoice support, and bounded tax/freight/discount reconciliation.
 - Exception detection for arithmetic mismatches, missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
 - Human approval/rejection API and review queue.
 - Mock ERP adapter with idempotent payment-journal posting.
@@ -60,6 +60,8 @@ Phoenix is then available at <http://localhost:6006>.
 OCR models are downloaded into the container's temporary cache on first image processing. For a reusable local evaluation cache, mount a volume at `/tmp` as shown in `docs/evaluation-report.md` or run the Compose API service normally.
 
 ## Local development
+
+The evaluation dependency set is tested on Python 3.12. Use the Docker workflow when a newer host interpreter is installed.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -127,6 +129,9 @@ The Compose service explicitly passes these values into the API container. Call 
 | `MATCH_PRICE_TOLERANCE_PCT` | `2.0` | Maximum unit-price variance |
 | `MATCH_QUANTITY_TOLERANCE_PCT` | `0.0` | Maximum ordered-quantity variance |
 | `MATCH_TOTAL_TOLERANCE_PCT` | `2.0` | Maximum goods-subtotal variance against the PO |
+| `MATCH_MAX_TAX_PCT` | `25.0` | Maximum tax as a percentage of invoice subtotal |
+| `MATCH_MAX_FREIGHT_PCT` | `10.0` | Maximum freight as a percentage of invoice subtotal |
+| `MATCH_MAX_DISCOUNT_PCT` | `30.0` | Maximum discount as a percentage of invoice subtotal |
 | `REQUIRE_HUMAN_APPROVAL` | `false` | Require explicit approval before every posting |
 | `AUTO_POST_ENABLED` | `true` | Deployment policy flag for automatic posting |
 | `OLLAMA_MODEL` | `llama3.2:3b` | Local model used by optional AI extensions |

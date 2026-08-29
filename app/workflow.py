@@ -150,6 +150,9 @@ class InvoiceWorkflow:
             self.config.total_tolerance_pct,
             require_goods_receipt,
             duplicate,
+            self.config.max_tax_pct,
+            self.config.max_freight_pct,
+            self.config.max_discount_pct,
         )
         self.repo.save_match(result)
         invoice.status = Status.MATCHED if result.matched else Status.EXCEPTION

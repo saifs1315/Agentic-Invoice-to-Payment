@@ -1,8 +1,12 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
+from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from app.extraction import extract_invoice
+from app.extraction import _temporary_path, _text_from_payload, extract_invoice
 
 
 class ExtractionTests(TestCase):
@@ -21,10 +25,34 @@ Invoice Total: 1000.00"""
         self.assertEqual("text", invoice.extraction_mode)
         self.assertEqual("success", invoice.extraction_attempts[-1]["outcome"])
 
+        with _temporary_path(b"reopenable", ".bin") as filename:
+            path = Path(filename)
+            self.assertEqual(b"reopenable", path.read_bytes())
+        self.assertFalse(path.exists())
+
+        class FailingReader:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def readtext(self, *args, **kwargs):
+                raise RuntimeError("simulated OCR failure")
+
+        with (
+            patch.dict(sys.modules, {"easyocr": SimpleNamespace(Reader=FailingReader)}),
+            patch("app.extraction._docling_text", side_effect=RuntimeError("no docling")),
+        ):
+            _, _, attempts = _text_from_payload(b"scan", "invoice.png")
+        easyocr_attempts = [item for item in attempts if item["backend"] == "easyocr"]
+        self.assertEqual(["failed"], [item["outcome"] for item in easyocr_attempts])
+
     def test_invalid_currency_is_rejected(self):
         content = b'{"vendor_id":"V1","invoice_number":"I1","invoice_date":"2026-08-22","currency":"US","total":"1","lines":[]}'
         with self.assertRaises(ValidationError):
             extract_invoice(content, "invoice.json", "test:invalid")
+
+        excessive = b'{"vendor_id":"V1","invoice_number":"I2","invoice_date":"2026-08-22","currency":"USD","total":"999999999999999999999999999","lines":[]}'
+        with self.assertRaises(ValidationError):
+            extract_invoice(excessive, "invoice.json", "test:excessive")
 
     def test_tax_and_subtotal_are_preserved_for_reconciliation(self):
         content = b'''{
@@ -37,3 +65,5 @@ Invoice Total: 1000.00"""
         invoice = extract_invoice(content, "tax.json", "test:tax")
         self.assertEqual("1000.00", str(invoice.subtotal))
         self.assertEqual("80.00", str(invoice.tax_amount))
+        self.assertEqual("json:subtotal", invoice.evidence["subtotal"])
+        self.assertEqual("json:tax_amount", invoice.evidence["tax_amount"])

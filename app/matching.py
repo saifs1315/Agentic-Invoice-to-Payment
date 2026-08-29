@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, localcontext
 
-from app.domain import Invoice, MatchResult, PurchaseOrder, Variance
+from app.domain import (
+    MAX_MONETARY_AMOUNT,
+    MAX_QUANTITY,
+    Invoice,
+    MatchResult,
+    PurchaseOrder,
+    Variance,
+)
 
 
 MONEY = Decimal("0.01")
@@ -14,13 +21,82 @@ def _pct(actual: Decimal, expected: Decimal) -> float:
     return float(abs(actual - expected) / abs(expected) * 100)
 
 
+def _ratio_pct(amount: Decimal, base: Decimal) -> float:
+    if base == 0:
+        return 0.0 if amount == 0 else 100.0
+    return float(abs(amount) / abs(base) * 100)
+
+
 def _money(value: Decimal) -> Decimal:
-    return value.quantize(MONEY)
+    with localcontext() as context:
+        context.prec = max(28, len(value.as_tuple().digits) + abs(value.as_tuple().exponent) + 4)
+        return value.quantize(MONEY)
 
 
-def match_invoice(invoice: Invoice, po: PurchaseOrder | None, price_tolerance_pct: float = 2.0, quantity_tolerance_pct: float = 0.0, total_tolerance_pct: float = 2.0, require_goods_receipt: bool = True, duplicate: bool = False) -> MatchResult:
+def match_invoice(
+    invoice: Invoice,
+    po: PurchaseOrder | None,
+    price_tolerance_pct: float = 2.0,
+    quantity_tolerance_pct: float = 0.0,
+    total_tolerance_pct: float = 2.0,
+    require_goods_receipt: bool = True,
+    duplicate: bool = False,
+    max_tax_pct: float = 25.0,
+    max_freight_pct: float = 10.0,
+    max_discount_pct: float = 30.0,
+) -> MatchResult:
     variances: list[Variance] = []
     match_type = "3-way" if require_goods_receipt else "2-way"
+    monetary_values = [
+        ("total", invoice.total),
+        ("subtotal", invoice.subtotal),
+        ("tax_amount", invoice.tax_amount),
+        ("freight_amount", invoice.freight_amount),
+        ("discount_amount", invoice.discount_amount),
+    ]
+    monetary_values.extend(
+        (f"lines[{index}].{field}", value)
+        for index, line in enumerate(invoice.lines, 1)
+        for field, value in (("unit_price", line.unit_price), ("amount", line.amount))
+    )
+    for field, value in monetary_values:
+        if value is not None and (value < 0 or value > MAX_MONETARY_AMOUNT):
+            variances.append(
+                Variance(
+                    "AMOUNT_OUT_OF_RANGE",
+                    field,
+                    f"0..{MAX_MONETARY_AMOUNT}",
+                    str(value),
+                    None,
+                    "Monetary amount is outside the supported prototype range",
+                )
+            )
+    for index, line in enumerate(invoice.lines, 1):
+        if line.quantity <= 0 or line.quantity > MAX_QUANTITY:
+            variances.append(
+                Variance(
+                    "QUANTITY_OUT_OF_RANGE",
+                    f"lines[{index}].quantity",
+                    f">0..{MAX_QUANTITY}",
+                    str(line.quantity),
+                    None,
+                    "Quantity is outside the supported prototype range",
+                )
+            )
+    if variances:
+        return MatchResult(invoice.id, match_type, False, variances, invoice.po_number)
+
+    if not invoice.lines:
+        variances.append(
+            Variance(
+                "LINE_DETAIL_MISSING",
+                "lines",
+                "At least one mapped invoice line",
+                None,
+                None,
+                "Invoice line detail could not be extracted",
+            )
+        )
     line_total = Decimal("0")
     for index, line in enumerate(invoice.lines, 1):
         calculated = _money(line.quantity * line.unit_price)
@@ -49,23 +125,42 @@ def match_invoice(invoice: Invoice, po: PurchaseOrder | None, price_tolerance_pc
                 "Invoice subtotal does not equal the sum of line amounts",
             )
         )
-    calculated_total = _money(
-        declared_subtotal
-        + invoice.tax_amount
-        + invoice.freight_amount
-        - invoice.discount_amount
-    )
-    if _money(invoice.total) != calculated_total:
-        variances.append(
-            Variance(
-                "INVOICE_TOTAL_MISMATCH",
-                "total",
-                str(calculated_total),
-                str(_money(invoice.total)),
-                _pct(invoice.total, calculated_total),
-                "Invoice total does not reconcile to subtotal, tax, freight, and discount",
-            )
+    if invoice.lines or invoice.subtotal is not None:
+        calculated_total = _money(
+            declared_subtotal
+            + invoice.tax_amount
+            + invoice.freight_amount
+            - invoice.discount_amount
         )
+        if _money(invoice.total) != calculated_total:
+            variances.append(
+                Variance(
+                    "INVOICE_TOTAL_MISMATCH",
+                    "total",
+                    str(calculated_total),
+                    str(_money(invoice.total)),
+                    _pct(invoice.total, calculated_total),
+                    "Invoice total does not reconcile to subtotal, tax, freight, and discount",
+                )
+            )
+    ancillary_limits = (
+        ("TAX_VARIANCE", "tax_amount", invoice.tax_amount, max_tax_pct),
+        ("FREIGHT_VARIANCE", "freight_amount", invoice.freight_amount, max_freight_pct),
+        ("DISCOUNT_VARIANCE", "discount_amount", invoice.discount_amount, max_discount_pct),
+    )
+    for code, field, amount, limit in ancillary_limits:
+        percentage = _ratio_pct(amount, declared_subtotal)
+        if amount > 0 and percentage > limit:
+            variances.append(
+                Variance(
+                    code,
+                    field,
+                    f"<={limit}% of subtotal",
+                    str(_money(amount)),
+                    round(percentage, 4),
+                    f"Invoice {field.replace('_', ' ')} exceeds configured policy",
+                )
+            )
     if duplicate:
         variances.append(Variance("DUPLICATE_INVOICE", "invoice_number", None, invoice.invoice_number, None, "Vendor and invoice number already exist"))
     if not invoice.po_number or po is None:
@@ -93,7 +188,8 @@ def match_invoice(invoice: Invoice, po: PurchaseOrder | None, price_tolerance_pc
         if require_goods_receipt and line.quantity > po_line.received_quantity:
             variances.append(Variance("RECEIPT_SHORTFALL", f"lines[{index}].received_quantity", str(po_line.received_quantity), str(line.quantity), _pct(line.quantity, po_line.received_quantity), "Invoiced quantity exceeds goods received"))
 
-    total_pct = _pct(declared_subtotal, expected_goods_total)
-    if total_pct > total_tolerance_pct:
-        variances.append(Variance("TOTAL_VARIANCE", "subtotal", str(_money(expected_goods_total)), str(_money(declared_subtotal)), round(total_pct, 4), "Invoice goods subtotal exceeds the PO value for the invoiced quantities"))
+    if invoice.lines:
+        total_pct = _pct(declared_subtotal, expected_goods_total)
+        if total_pct > total_tolerance_pct:
+            variances.append(Variance("TOTAL_VARIANCE", "subtotal", str(_money(expected_goods_total)), str(_money(declared_subtotal)), round(total_pct, 4), "Invoice goods subtotal exceeds the PO value for the invoiced quantities"))
     return MatchResult(invoice.id, match_type, not any(v.blocking for v in variances), variances, po.number)

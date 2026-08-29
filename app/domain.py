@@ -8,6 +8,10 @@ from typing import Any
 from uuid import uuid4
 
 
+MAX_MONETARY_AMOUNT = Decimal("1000000000.00")
+MAX_QUANTITY = Decimal("1000000")
+
+
 def uid(prefix: str) -> str:
     return f"{prefix}_{uuid4().hex[:16]}"
 

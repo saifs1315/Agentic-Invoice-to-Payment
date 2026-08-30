@@ -22,7 +22,7 @@ class ContextRetriever:
                 Document(
                     text=policy,
                     id_=f"policy-{index}",
-                    metadata={"source": "AP control policy", "policy_id": f"policy-{index}"},
+                    metadata={"source": "finance control policy", "policy_id": f"policy-{index}"},
                 )
                 for index, policy in enumerate(POLICIES, start=1)
             ]

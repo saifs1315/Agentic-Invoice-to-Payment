@@ -1,0 +1,260 @@
+openapi: 3.1.0
+info:
+  title: LedgerPilot Mock ERP API
+  description: A stateful HTTP sandbox for PO, goods receipt, journal, and cash APIs.
+  version: 1.0.0
+paths:
+  /erp/v1/health:
+    get:
+      summary: Health
+      operationId: health_erp_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Health Erp V1 Health Get
+  /erp/v1/purchase-orders/{po_number}:
+    get:
+      summary: Purchase Order
+      operationId: purchase_order_erp_v1_purchase_orders__po_number__get
+      parameters:
+      - name: po_number
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Po Number
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Purchase Order Erp V1 Purchase Orders  Po Number  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /erp/v1/purchase-orders/{po_number}/goods-receipts:
+    get:
+      summary: Goods Receipts
+      operationId: goods_receipts_erp_v1_purchase_orders__po_number__goods_receipts_get
+      parameters:
+      - name: po_number
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Po Number
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Goods Receipts Erp V1 Purchase Orders  Po Number  Goods
+                  Receipts Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /erp/v1/payment-journals:
+    post:
+      summary: Payment Journal
+      operationId: payment_journal_erp_v1_payment_journals_post
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentJournalRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Payment Journal Erp V1 Payment Journals Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /erp/v1/customers/{customer_id}/open-items:
+    get:
+      summary: Open Items
+      operationId: open_items_erp_v1_customers__customer_id__open_items_get
+      parameters:
+      - name: customer_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Customer Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Open Items Erp V1 Customers  Customer Id  Open Items
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /erp/v1/cash-applications:
+    post:
+      summary: Cash Application
+      operationId: cash_application_erp_v1_cash_applications_post
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CashApplicationRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Cash Application Erp V1 Cash Applications Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    CashApplicationRequest:
+      properties:
+        remittance_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Remittance Id
+        customer_id:
+          type: string
+          title: Customer Id
+        amount:
+          anyOf:
+          - type: number
+            exclusiveMinimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+        open_item_refs:
+          items:
+            type: string
+          type: array
+          minItems: 1
+          title: Open Item Refs
+      type: object
+      required:
+      - customer_id
+      - amount
+      - currency
+      - open_item_refs
+      title: CashApplicationRequest
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    PaymentJournalRequest:
+      properties:
+        invoice_id:
+          type: string
+          title: Invoice Id
+        vendor_id:
+          type: string
+          title: Vendor Id
+        amount:
+          anyOf:
+          - type: number
+            exclusiveMinimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+        po_number:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Po Number
+      type: object
+      required:
+      - invoice_id
+      - vendor_id
+      - amount
+      - currency
+      title: PaymentJournalRequest
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

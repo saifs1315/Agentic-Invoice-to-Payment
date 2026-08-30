@@ -3,12 +3,14 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .venv/
+.tmp/
 .env
 data/uploads/*
 !data/uploads/.gitkeep
 evaluation/results/*.json
 !evaluation/results/.gitkeep
 !evaluation/results/latest.json
+!evaluation/results/ar-latest.json
 !evaluation/results/rag-latest.json
 dist/
 .deck-build/

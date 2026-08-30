@@ -1,20 +1,20 @@
 # LedgerPilot
 
-LedgerPilot is an auditable prototype for agentic accounts-payable invoice processing and accounts-receivable remittance application. It ingests invoice attachments from a shared Microsoft 365 mailbox or API upload, extracts normalized finance data, performs deterministic two-way or three-way matching, routes exceptions for human review, and posts idempotent payment journals to a mock ERP adapter.
+LedgerPilot is an auditable agentic-finance prototype for accounts-payable invoices and accounts-receivable remittances. One document-processing layer converts and classifies mailbox or API attachments; a parent LangGraph orchestrator then dispatches the typed payload to an AP or AR subgraph. AP performs deterministic two-way/three-way matching and posts a Payment Journal, while AR mirrors the same retrieve-match-resolve/post pattern against open items and applies cash. Both use a separate stateful Mock ERP HTTP API.
 
 The prototype intentionally separates probabilistic AI from financial controls: Docling and optional Ollama interpret documents, while a real LlamaIndex vector index and PostgreSQL/pgvector retrieve policy context. Deterministic code evaluates arithmetic, tolerances, duplicate rules, approval requirements, and posting eligibility.
 
 ## What is included
 
-- Microsoft Graph shared-mailbox adapter plus direct PDF, image, HTML, text, and JSON upload.
-- Typed extraction with PDF text, EasyOCR, an explicitly evaluated Docling path, optional validated Ollama JSON, evidence references, and an auditable backend-attempt trace.
-- LangGraph workflow that executes policy retrieval, deterministic matching, conditional posting, and review routing.
+- Microsoft Graph shared-mailbox adapter plus unified PDF, image, HTML, text, and JSON ingestion at `POST /api/v1/ingest-document`.
+- One canonical document layer with deterministic AP/AR classification, typed domain extraction, evidence, confidence, and backend-attempt traces; ambiguity is escalated instead of guessed.
+- A parent LangGraph finance orchestrator that dispatches to independently controlled AP and AR LangGraph subworkflows.
 - LlamaIndex `VectorStoreIndex` retrieval fused with PostgreSQL/pgvector policy ranking and an offline fallback.
 - Two-way and three-way PO/GR matching with configurable tolerances, partial-invoice support, and bounded tax/freight/discount reconciliation.
 - Exception detection for arithmetic mismatches, missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
-- Human approval/rejection API and review queue.
-- Mock ERP adapter with idempotent payment-journal posting.
-- Structured AR remittance-to-open-item matching and cash application, with failed applications exposed through a read-only operator queue.
+- Unified AP/AR exception desk plus domain-specific, audited human actions.
+- Separate FastAPI Mock ERP service with PO, Goods Receipt, Payment Journal, open-AR-item, and cash-application endpoints; application containers use an HTTP client boundary.
+- Mirrored AR document extraction, policy retrieval, deterministic allocation, review/correction/re-match, and idempotent cash application. Invalid matches cannot be force-approved.
 - SHA-256 hash-chained audit events and optional PostgreSQL persistence.
 - Durable PostgreSQL workflow state, journals, remittances, and policy embeddings.
 - PostgreSQL 16 + pgvector schema, Ollama, and Arize Phoenix services.
@@ -32,9 +32,12 @@ Prerequisites: Docker Desktop with Compose v2 and at least 6 GB of free memory f
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up --build -d postgres api
+docker compose up --build -d postgres mock-erp api
 Invoke-RestMethod http://localhost:8000/api/v1/health
+Invoke-RestMethod http://localhost:8080/erp/v1/health
 ```
+
+Compose uses the named `ledgerpilot-unified-postgres-data` volume by default. This isolates the unified workflow schema and audit chain from any pre-refactor local demo volume without deleting the older data. Override `POSTGRES_VOLUME_NAME` when a different retained environment is intentional.
 
 Open:
 
@@ -75,6 +78,7 @@ Run verification:
 ```powershell
 python -m pytest
 python evaluation\run_evaluation.py
+python evaluation\run_ar_evaluation.py
 python evaluation\run_rag_evaluation.py
 docker compose config --quiet
 ```
@@ -82,6 +86,8 @@ docker compose config --quiet
 ## API walkthrough
 
 The canonical contract is [openapi/openapi.yaml](openapi/openapi.yaml). The five mandatory endpoints are implemented verbatim.
+
+The preferred cross-domain entry point is `POST /api/v1/ingest-document`. It classifies and dispatches a document end-to-end. The mandatory `/ingest-invoice`, `/match-po`, and `/post-payment-journal` endpoints remain compatibility wrappers for the explicit AP walkthrough.
 
 ```powershell
 # 1. Ingest a fixture
@@ -107,6 +113,21 @@ Invoke-RestMethod "http://localhost:8000/api/v1/audit-log?entity_id=$($ingested.
 ```
 
 To test an exception, ingest `evaluation/fixtures/po-1001-price-variance.json`. Reviewers can approve or reject through `POST /api/v1/exceptions/decision`. Set `REQUIRE_HUMAN_APPROVAL=true` to require approval even for a clean match. Set `AUTO_POST_ENABLED=false` when you want matching and posting to remain two separate demo steps.
+
+### Unified AP/AR dispatch
+
+```powershell
+# Let the parent orchestrator classify and dispatch an AR document.
+$ar = Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8000/api/v1/ingest-document `
+  -Form @{ file = Get-Item evaluation\fixtures\remittance-clean.json }
+
+# Inspect the durable domain workflow state and audit provenance.
+Invoke-RestMethod "http://localhost:8000/api/v1/workflows/$($ar.entity_id)"
+Invoke-RestMethod "http://localhost:8000/api/v1/audit-log?entity_id=$($ar.entity_id)"
+```
+
+AR exceptions expose `RETRY_WITH_CORRECTION`, `REJECT`, and `MARK_MANUALLY_RESOLVED` at `POST /api/v1/remittance-exceptions/decision`. When global approval is enabled, `APPROVE_APPLY` is accepted only for a remittance that already passed deterministic matching. Every correction is re-matched against current ERP state before cash is applied.
 
 ### Variance-code reference
 
@@ -209,7 +230,7 @@ This remains a prototype. Before production: add malware scanning, object-store 
 ## Repository map
 
 ```text
-app/                    API, domain, workflow, extraction, matching, adapters
+app/                    Parent orchestrator, AP/AR graphs, shared extraction, controls, adapters
 db/schema.sql           PostgreSQL + pgvector schema
 evaluation/             fixtures, labels, evaluator, reproducible results
 tests/                  unit and workflow tests
@@ -217,5 +238,5 @@ openapi/openapi.yaml    versioned API contract
 docs/                   architecture, controls, evaluation, traceability
 presentation/           12-slide assignment deck
 scripts/demo.ps1        end-to-end API demo
-docker-compose.yml      API, PostgreSQL, Ollama, Phoenix
+docker-compose.yml      API, Mock ERP HTTP service, PostgreSQL, Ollama, Phoenix
 ```

@@ -1,14 +1,16 @@
 stateDiagram-v2
-  [*] --> Received
-  Received --> Extracted: attachment parsed
-  Extracted --> Exception: missing or low-confidence data
-  Extracted --> Matching: required fields valid
-  Matching --> Exception: duplicate, missing PO, variance, or GR shortfall
-  Matching --> Matched: controls pass
-  Matched --> Approved: approval policy satisfied
-  Exception --> Approved: human approves with comment
-  Exception --> Rejected: human rejects
-  Approved --> Posted: idempotent ERP call succeeds
-  Posted --> [*]
-  Rejected --> [*]
-
+  [*] --> CanonicalDocument
+  CanonicalDocument --> ClassificationReview: ambiguous
+  CanonicalDocument --> APSubgraph: AP invoice
+  CanonicalDocument --> ARSubgraph: AR remittance
+  APSubgraph --> APException: PO / GR / variance control fails
+  APSubgraph --> PaymentJournal: match + approval policy passes
+  ARSubgraph --> ARException: allocation control fails
+  ARSubgraph --> CashApplication: match + approval policy passes
+  ARException --> ARSubgraph: corrected and re-matched
+  ARException --> Resolved: rejected or manually resolved
+  APException --> PaymentJournal: explicit AP decision policy
+  APException --> Resolved: rejected
+  PaymentJournal --> [*]
+  CashApplication --> [*]
+  Resolved --> [*]

@@ -1,0 +1,7 @@
+{
+  "customer_id": "CUST-001",
+  "reference": "REM-JSON-MISSING",
+  "amount": "1000.00",
+  "currency": "USD",
+  "open_item_refs": ["AR-NOT-FOUND"]
+}

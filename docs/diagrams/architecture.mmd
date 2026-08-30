@@ -1,22 +1,29 @@
 flowchart LR
-  EMAIL[Shared AP mailbox] --> GRAPH[Microsoft Graph adapter]
-  UPLOAD[Direct API upload] --> INGEST[Ingestion and source hashing]
-  GRAPH --> INGEST
-  INGEST --> DOCLING[Docling conversion and extraction]
-  DOCLING --> AGENT[LangGraph workflow]
-  POLICY[(Policies in PostgreSQL plus pgvector)] --> LLAMA[LlamaIndex retrieval]
-  OLLAMA[Ollama local LLM] --> AGENT
-  LLAMA --> AGENT
-  AGENT --> MATCH[Deterministic two-way or three-way matcher]
-  ERP[(ERP adapter: PO, GR, open AR)] --> MATCH
-  MATCH -->|clean| POST[Idempotent journal or cash application]
-  MATCH -->|exception| HUMAN[Human review]
-  HUMAN -->|approved| POST
-  POST --> ERP
-  INGEST --> AUDIT[(Hash-chained audit ledger)]
-  AGENT --> AUDIT
-  MATCH --> AUDIT
+  EMAIL[Shared finance mailbox] --> GRAPH[Microsoft Graph adapter]
+  UPLOAD[Unified document API] --> DOC[Source hash + canonical processor]
+  GRAPH --> DOC
+  DOC --> CLASS[Deterministic AP / AR classifier]
+  CLASS -->|AP invoice| ORCH[Parent LangGraph orchestrator]
+  CLASS -->|AR remittance| ORCH
+  CLASS -->|ambiguous| HUMAN[Unified exception desk]
+  ORCH --> AP[AP subgraph: policy + 2/3-way match]
+  ORCH --> AR[AR subgraph: policy + open-item allocation]
+  POLICY[(Policies + pgvector)] --> LLAMA[LlamaIndex retrieval]
+  LLAMA --> AP
+  LLAMA --> AR
+  AP -->|clean| PJ[Payment Journal]
+  AR -->|clean| CASH[Cash application]
+  AP -->|exception| HUMAN
+  AR -->|exception| HUMAN
+  HUMAN -->|correct / approved policy path| AP
+  HUMAN -->|correct + rematch| AR
+  ERPAPI[HTTP Mock ERP API] -->|PO + GR| AP
+  ERPAPI -->|open AR items| AR
+  PJ --> ERPAPI
+  CASH --> ERPAPI
+  DOC --> AUDIT[(Hash-chained audit + durable workflow state)]
+  ORCH --> AUDIT
+  AP --> AUDIT
+  AR --> AUDIT
   HUMAN --> AUDIT
-  POST --> AUDIT
-  AGENT -. traces .-> PHOENIX[Arize Phoenix]
-
+  ORCH -. traces .-> PHOENIX[Arize Phoenix]

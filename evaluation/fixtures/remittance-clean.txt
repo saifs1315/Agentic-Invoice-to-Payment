@@ -1,0 +1,5 @@
+Customer ID: CUST-001
+Remittance Reference: REM-TEXT-001
+Payment Amount: 1000.00
+Currency: USD
+Open Items: AR-9001, AR-9002

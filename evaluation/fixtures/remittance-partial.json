@@ -1,0 +1,7 @@
+{
+  "customer_id": "CUST-001",
+  "reference": "REM-JSON-PARTIAL",
+  "amount": "900.00",
+  "currency": "USD",
+  "open_item_refs": ["AR-9001", "AR-9002"]
+}

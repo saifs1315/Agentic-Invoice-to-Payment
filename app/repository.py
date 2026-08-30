@@ -18,6 +18,9 @@ POLICIES = [
     "Duplicate vendor invoice numbers are blocked from posting.",
     "A three-way match requires goods received quantity to cover invoiced quantity.",
     "Only approved and matched invoices may be posted; posting must be idempotent.",
+    "Customer remittances must match open AR items by customer, reference, currency, and amount.",
+    "Cash application must be idempotent and revalidate open-item state immediately before posting.",
+    "Unapplied, partial, duplicate, or ambiguous remittances require human resolution.",
 ]
 
 
@@ -139,6 +142,26 @@ class MemoryRepository:
     def get_workflow_state(self, invoice_id: str) -> dict[str, Any] | None:
         return self.workflow_states.get(invoice_id)
 
+    def save_finance_workflow_state(
+        self,
+        entity_id: str,
+        workflow_type: str,
+        node: str,
+        status: str,
+        state: dict[str, Any],
+        source_ref: str | None = None,
+    ) -> None:
+        self.workflow_states[entity_id] = {
+            "workflow_type": workflow_type,
+            "node": node,
+            "status": status,
+            "source_ref": source_ref,
+            "state": state,
+        }
+
+    def get_finance_workflow_state(self, entity_id: str) -> dict[str, Any] | None:
+        return self.workflow_states.get(entity_id)
+
     def search_policies(self, query: str, top_k: int = 2) -> list[str]:
         words = set(re.findall(r"[a-z0-9]+", query.lower()))
         ranked = sorted(
@@ -167,6 +190,30 @@ class MemoryRepository:
             self.remittances[remittance.id] = remittance
             self.remittance_results[remittance.id] = result
 
+    def get_remittance(self, remittance_id: str) -> Remittance | None:
+        return self.remittances.get(remittance_id)
+
+    def get_remittance_result(self, remittance_id: str) -> dict[str, Any]:
+        return self.remittance_results.get(remittance_id, {})
+
+    def find_duplicate_remittance(
+        self,
+        customer_id: str,
+        reference: str,
+        exclude_id: str | None = None,
+    ) -> Remittance | None:
+        return next(
+            (
+                remittance
+                for remittance in self.remittances.values()
+                if remittance.customer_id == customer_id
+                and remittance.reference == reference
+                and remittance.id != exclude_id
+                and remittance.status != Status.REJECTED
+            ),
+            None,
+        )
+
     def list_remittances(self, status: Status | None = None) -> list[dict[str, Any]]:
         remittances = reversed(list(self.remittances.values()))
         return [
@@ -191,7 +238,29 @@ class PostgresRepository(MemoryRepository):
 
         self.pool = ConnectionPool(database_url, min_size=1, max_size=5, open=True)
         self.backend = "postgresql"
+        self._ensure_runtime_schema()
         self._seed_policies()
+
+    def _ensure_runtime_schema(self) -> None:
+        """Apply additive prototype migrations for already-created Docker volumes."""
+        with self.pool.connection() as conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS finance_workflow_runs (
+                entity_id TEXT PRIMARY KEY,
+                workflow_type TEXT NOT NULL CHECK (
+                    workflow_type IN ('ap', 'ar', 'classification')
+                ),
+                source_ref TEXT,
+                current_node TEXT NOT NULL,
+                status TEXT NOT NULL,
+                state JSONB NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )"""
+            )
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS finance_workflow_status_idx
+                ON finance_workflow_runs(workflow_type, status)"""
+            )
 
     def _seed_policies(self) -> None:
         with self.pool.connection() as conn:
@@ -201,7 +270,12 @@ class PostgresRepository(MemoryRepository):
                     """INSERT INTO policy_documents (id, content, embedding, metadata)
                     VALUES (%s,%s,%s::vector,%s::jsonb)
                     ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content, embedding=EXCLUDED.embedding""",
-                    (f"policy-{index}", policy, embedding, json.dumps({"source": "AP control policy"})),
+                    (
+                        f"policy-{index}",
+                        policy,
+                        embedding,
+                        json.dumps({"source": "finance control policy"}),
+                    ),
                 )
 
     def save_invoice(self, invoice: Invoice) -> Invoice:
@@ -351,6 +425,65 @@ class PostgresRepository(MemoryRepository):
         self.workflow_states[invoice_id] = state
         return state
 
+    def save_finance_workflow_state(
+        self,
+        entity_id: str,
+        workflow_type: str,
+        node: str,
+        status: str,
+        state: dict[str, Any],
+        source_ref: str | None = None,
+    ) -> None:
+        MemoryRepository.save_finance_workflow_state(
+            self,
+            entity_id,
+            workflow_type,
+            node,
+            status,
+            state,
+            source_ref,
+        )
+        with self.pool.connection() as conn:
+            conn.execute(
+                """INSERT INTO finance_workflow_runs
+                (entity_id,workflow_type,source_ref,current_node,status,state,updated_at)
+                VALUES (%s,%s,%s,%s,%s,%s::jsonb,now())
+                ON CONFLICT (entity_id) DO UPDATE SET workflow_type=EXCLUDED.workflow_type,
+                source_ref=EXCLUDED.source_ref,current_node=EXCLUDED.current_node,
+                status=EXCLUDED.status,state=EXCLUDED.state,updated_at=now()""",
+                (
+                    entity_id,
+                    workflow_type,
+                    source_ref,
+                    node,
+                    status,
+                    json.dumps(state, default=str),
+                ),
+            )
+
+    def get_finance_workflow_state(self, entity_id: str) -> dict[str, Any] | None:
+        local = MemoryRepository.get_finance_workflow_state(self, entity_id)
+        if local:
+            return local
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                """SELECT workflow_type,current_node,status,source_ref,state,updated_at
+                FROM finance_workflow_runs WHERE entity_id=%s""",
+                (entity_id,),
+            ).fetchone()
+        if not row:
+            return None
+        state = {
+            "workflow_type": row[0],
+            "node": row[1],
+            "status": row[2],
+            "source_ref": row[3],
+            "state": row[4],
+            "updated_at": row[5].isoformat(),
+        }
+        self.workflow_states[entity_id] = state
+        return state
+
     def search_policies(self, query: str, top_k: int = 2) -> list[str]:
         embedding = "[" + ",".join(f"{value:.8f}" for value in deterministic_embedding(query)) + "]"
         with self.pool.connection() as conn:
@@ -410,6 +543,68 @@ class PostgresRepository(MemoryRepository):
                     json.dumps({"remittance": remittance.to_dict(), "result": result}),
                 ),
             )
+
+    def get_remittance(self, remittance_id: str) -> Remittance | None:
+        local = MemoryRepository.get_remittance(self, remittance_id)
+        if local:
+            return local
+        with self.pool.connection() as conn:
+            row = conn.execute(
+                "SELECT payload FROM remittances WHERE id=%s",
+                (remittance_id,),
+            ).fetchone()
+        if not row:
+            return None
+        data = row[0]["remittance"]
+        remittance = Remittance(
+            customer_id=data["customer_id"],
+            reference=data["reference"],
+            amount=Decimal(str(data["amount"])),
+            currency=data["currency"],
+            open_item_refs=list(data["open_item_refs"]),
+            source_ref=data["source_ref"],
+            id=data["id"],
+            status=Status(data["status"]),
+            confidence=float(data.get("confidence", 0.0)),
+            evidence=dict(data.get("evidence", {})),
+            extraction_mode=data.get("extraction_mode", "structured"),
+            extraction_attempts=list(data.get("extraction_attempts", [])),
+            created_at=data.get("created_at", ""),
+        )
+        self.remittances[remittance.id] = remittance
+        self.remittance_results[remittance.id] = row[0].get("result", {})
+        return remittance
+
+    def get_remittance_result(self, remittance_id: str) -> dict[str, Any]:
+        self.get_remittance(remittance_id)
+        return MemoryRepository.get_remittance_result(self, remittance_id)
+
+    def find_duplicate_remittance(
+        self,
+        customer_id: str,
+        reference: str,
+        exclude_id: str | None = None,
+    ) -> Remittance | None:
+        local = MemoryRepository.find_duplicate_remittance(
+            self, customer_id, reference, exclude_id
+        )
+        if local:
+            return local
+        with self.pool.connection() as conn:
+            if exclude_id is None:
+                row = conn.execute(
+                    """SELECT id FROM remittances
+                    WHERE customer_id=%s AND reference=%s AND status<>%s LIMIT 1""",
+                    (customer_id, reference, Status.REJECTED.value),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    """SELECT id FROM remittances
+                    WHERE customer_id=%s AND reference=%s AND status<>%s
+                    AND id<>%s LIMIT 1""",
+                    (customer_id, reference, Status.REJECTED.value, exclude_id),
+                ).fetchone()
+        return self.get_remittance(row[0]) if row else None
 
     def list_remittances(self, status: Status | None = None) -> list[dict[str, Any]]:
         query = "SELECT payload FROM remittances"

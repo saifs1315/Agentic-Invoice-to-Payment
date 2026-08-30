@@ -2,17 +2,18 @@
 
 | Assignment requirement | Implementation evidence |
 |---|---|
-| Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/extraction.py`, `/api/v1/mailbox/poll`; Compose passes `GRAPH_*` credentials into the API |
-| Contextual agentic workflow | `app/workflow.py` executable LangGraph branches; durable `workflow_runs`; `app/context.py` real LlamaIndex `VectorStoreIndex` fused with pgvector/repository ranking |
+| Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/document_processing.py`, `/api/v1/mailbox/poll`; attachments enter the same parent orchestrator as API uploads |
+| Contextual agentic workflow | `app/orchestrator.py` parent LangGraph plus AP `app/workflow.py` and AR `app/ar_workflow.py` subgraphs; durable generic `finance_workflow_runs`; LlamaIndex fused with pgvector/repository ranking |
 | 2-way / 3-way matching | `app/matching.py`, configurable tolerances, partial quantities, bounded tax/freight/discount reconciliation, magnitude limits, and blocking arithmetic controls |
 | Exception routing | variance codes, exception status, `/api/v1/exceptions`, decision endpoint, `/review` |
-| Payment Journal posting | `app/erp.py`, `/api/v1/post-payment-journal`, idempotency header |
-| AR remittance matching | Structured `extract_remittance`, `/api/v1/ingest-remittance`, `MockERP.apply_cash`, durable result persistence, audit event, and read-only `/api/v1/remittance-exceptions` operator queue |
+| Payment Journal posting via ERP API | `HttpERPClient`, Mock ERP `POST /erp/v1/payment-journals`, mandatory `/api/v1/post-payment-journal`, defensive revalidation, idempotency header |
+| Mirror workflow for AR | Shared document conversion/classification; `RemittanceWorkflow` policy → deterministic match → conditional cash/review LangGraph; HTTP open-items/cash endpoints; correction/re-match decisions and unified queue |
+| Sandbox or Mock API for ERP | Separate `mock-erp` FastAPI Compose service exposes PO, Goods Receipt, Payment Journal, open-item, and cash-application HTTP contracts; application defaults to `ERP_MODE=http` in Compose |
 | Full audit trail | `app/audit.py`, source/evidence/policy/variance/human/ERP events, `/api/v1/audit-log` |
 | PostgreSQL + pgvector | `db/schema.sql`, Compose `pgvector/pgvector:pg16` service |
 | Ollama | pinned Compose service and configuration; optional local model profile |
 | Arize Phoenix | Compose service and `app/observability.py` registration |
-| RAGAS + extraction metrics | `evaluation/run_rag_evaluation.py` executes labeled RAGAS context precision/recall; `run_evaluation.py` covers seven documents and fails closed on document errors |
+| RAGAS + extraction metrics | RAGAS policy evaluation; seven-document AP evaluation; nine-document AR multi-format evaluation with classification, field, match, exception, false-cash, and audit metrics |
 | Mandatory five APIs | `app/api.py` and `openapi/openapi.yaml` |
 | Docker Compose | `Dockerfile`, `docker-compose.yml`, `.env.example` |
 | README and deployment | root `README.md` |

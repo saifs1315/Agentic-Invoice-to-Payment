@@ -11,7 +11,9 @@ services:
       LLM_EXTRACTION_ENABLED: ${LLM_EXTRACTION_ENABLED:-false}
       LLM_EXPLANATIONS_ENABLED: ${LLM_EXPLANATIONS_ENABLED:-false}
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
-      ERP_MODE: mock
+      ERP_MODE: http
+      ERP_BASE_URL: http://mock-erp:8080
+      ERP_TIMEOUT_SECONDS: ${ERP_TIMEOUT_SECONDS:-5.0}
       MATCH_PRICE_TOLERANCE_PCT: ${MATCH_PRICE_TOLERANCE_PCT:-2.0}
       MATCH_QUANTITY_TOLERANCE_PCT: ${MATCH_QUANTITY_TOLERANCE_PCT:-0.0}
       MATCH_TOTAL_TOLERANCE_PCT: ${MATCH_TOTAL_TOLERANCE_PCT:-2.0}
@@ -31,6 +33,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mock-erp:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+  mock-erp:
+    build: .
+    command: ["uvicorn", "app.mock_erp_api:app", "--host", "0.0.0.0", "--port", "8080"]
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/erp/v1/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
     read_only: true
@@ -65,5 +83,6 @@ services:
 
 volumes:
   postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:-ledgerpilot-unified-postgres-data}
   ollama-data:
   phoenix-data:

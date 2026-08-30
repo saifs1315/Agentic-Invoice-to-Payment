@@ -14,7 +14,14 @@ from typing import Any, Iterator
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import settings
-from app.domain import MAX_MONETARY_AMOUNT, MAX_QUANTITY, Invoice, InvoiceLine, Remittance
+from app.domain import (
+    MAX_MONETARY_AMOUNT,
+    MAX_QUANTITY,
+    CanonicalDocument,
+    Invoice,
+    InvoiceLine,
+    Remittance,
+)
 
 
 FIELD_PATTERNS = {
@@ -38,6 +45,14 @@ LINE_PATTERN = re.compile(
     r"po\s*line\s*[:#]?\s*(?P<po_line>[0-9]+)",
     re.IGNORECASE,
 )
+
+REMITTANCE_PATTERNS = {
+    "customer_id": r"customer(?:[_ ]id)?\s*[:#]\s*(?:\|\s*)?([A-Za-z0-9_-]+)",
+    "reference": r"(?:remittance|payment)(?:[_ ](?:reference|ref))?\s*[:#]\s*(?:\|\s*)?([A-Za-z0-9_-]+)",
+    "amount": r"(?:payment[_ ]amount|amount)\s*[:#]\s*(?:\|\s*)?([0-9]+(?:\.[0-9]{1,2})?)",
+    "currency": r"currency\s*[:#]\s*(?:\|\s*)?([A-Z]{3})",
+    "open_item_refs": r"(?:open[_ ]items?|invoice[_ ]refs?)\s*[:#]\s*(?:\|\s*)?([A-Za-z0-9_, -]+)",
+}
 
 
 class InvoiceLinePayload(BaseModel):
@@ -65,6 +80,26 @@ class InvoicePayload(BaseModel):
     @classmethod
     def normalize_currency(cls, value: Any) -> str:
         return str(value).upper()
+
+
+class RemittancePayload(BaseModel):
+    customer_id: str = Field(min_length=2)
+    reference: str = Field(min_length=1)
+    amount: Decimal = Field(gt=0, le=MAX_MONETARY_AMOUNT)
+    currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
+    open_item_refs: list[str] = Field(min_length=1)
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def normalize_currency(cls, value: Any) -> str:
+        return str(value).upper()
+
+    @field_validator("open_item_refs", mode="before")
+    @classmethod
+    def normalize_refs(cls, value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [item.strip() for item in re.split(r"[,;]", value) if item.strip()]
+        return [str(item).strip() for item in value]
 
 
 @contextmanager
@@ -176,13 +211,10 @@ def _ollama_extract(text: str) -> dict[str, Any]:
     return json.loads(content)
 
 
-def extract_invoice(
-    content: bytes,
-    filename: str,
-    source_ref: str,
-    processor: str = "auto",
-) -> Invoice:
-    text, mode, attempts = _text_from_payload(content, filename, processor)
+def extract_invoice_from_document(document: CanonicalDocument) -> Invoice:
+    text = document.text
+    mode = document.processing_mode
+    attempts = list(document.processing_attempts)
     if mode == "json":
         data: dict[str, Any] = json.loads(text)
     else:
@@ -250,7 +282,7 @@ def extract_invoice(
         total=payload.total,
         po_number=payload.po_number,
         lines=lines,
-        source_ref=source_ref,
+        source_ref=document.source_ref,
         confidence=confidence,
         evidence=evidence,
         subtotal=payload.subtotal,
@@ -262,5 +294,67 @@ def extract_invoice(
     )
 
 
+def extract_invoice(
+    content: bytes,
+    filename: str,
+    source_ref: str,
+    processor: str = "auto",
+) -> Invoice:
+    text, mode, attempts = _text_from_payload(content, filename, processor)
+    return extract_invoice_from_document(
+        CanonicalDocument(
+            source_ref=source_ref,
+            filename=filename,
+            media_type="application/octet-stream",
+            text=text,
+            processing_mode=mode,
+            processing_attempts=attempts,
+        )
+    )
+
+
+def extract_remittance_from_document(document: CanonicalDocument) -> Remittance:
+    if document.processing_mode == "json":
+        data: dict[str, Any] = json.loads(document.text)
+    else:
+        data = {}
+        for field, pattern in REMITTANCE_PATTERNS.items():
+            match = re.search(pattern, document.text, re.IGNORECASE)
+            data[field] = match.group(1) if match else None
+    required = ["customer_id", "reference", "amount", "currency", "open_item_refs"]
+    missing = [field for field in required if not data.get(field)]
+    if missing:
+        raise ValueError(f"missing required remittance fields: {', '.join(missing)}")
+    payload = RemittancePayload.model_validate(data)
+    evidence = {field: f"{document.processing_mode}:{field}" for field in required}
+    confidence = {"json": 1.0, "pdf-text": 0.92, "easyocr": 0.80}.get(
+        document.processing_mode, 0.82
+    )
+    return Remittance(
+        customer_id=payload.customer_id,
+        reference=payload.reference,
+        amount=payload.amount,
+        currency=payload.currency,
+        open_item_refs=payload.open_item_refs,
+        source_ref=document.source_ref,
+        confidence=confidence,
+        evidence=evidence,
+        extraction_mode=document.processing_mode,
+        extraction_attempts=list(document.processing_attempts),
+    )
+
+
 def extract_remittance(data: dict[str, Any], source_ref: str) -> Remittance:
-    return Remittance(str(data["customer_id"]), str(data["reference"]), Decimal(str(data["amount"])), str(data.get("currency", "USD")), [str(x) for x in data.get("open_item_refs", [])], source_ref)
+    payload = RemittancePayload.model_validate(data)
+    return Remittance(
+        payload.customer_id,
+        payload.reference,
+        payload.amount,
+        payload.currency,
+        payload.open_item_refs,
+        source_ref,
+        confidence=1.0,
+        evidence={field: f"structured:{field}" for field in RemittancePayload.model_fields},
+        extraction_mode="structured",
+        extraction_attempts=[{"backend": "structured", "outcome": "success"}],
+    )

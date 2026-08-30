@@ -12,6 +12,9 @@
 - Three-way matching prevents invoiced quantity from exceeding goods received for the current invoice. Cumulative consumption across multiple invoices is not modeled in this prototype.
 - Posting requires a successful match and, when configured, a named human approval.
 - ERP posting is idempotent.
+- The application container reaches ERP facts and posting only through an HTTP client boundary; the Mock ERP service independently revalidates posting facts and returns explicit conflicts.
+- AR applies cash only after deterministic customer-scoped open-item, currency, and exact-amount matching. Invalid AR matches cannot be human-approved into an application; corrections must be re-matched.
+- Ambiguous source documents enter classification review and never reach AP or AR posting logic.
 - Audit events are append-only in the application and hash-chained.
 - Secrets are supplied through environment variables; `.env` is excluded from Git.
 - The API container runs as non-root, read-only, and without privilege escalation.
@@ -25,7 +28,7 @@ Prototype identity limitation: the review API records the supplied actor and com
 | Identity | Entra/OIDC authentication, RBAC, segregation of duties, service principals scoped to one mailbox and ERP role |
 | Data | Encryption with managed keys, tenant isolation, retention/deletion policy, field-level redaction, encrypted backups |
 | Documents | Malware scanning, MIME signature validation, decompression limits, sandboxed conversion, prompt-injection filtering |
-| Workflow | Durable queue, retries/dead-letter queue, explicit state transition guards, replay protection |
+| Workflow | Durable queue, bounded retries/dead-letter queue, explicit state transition guards, replay protection, dual control for manual AR resolution |
 | ERP | Allow-listed journal types/accounts, amount limits, maker-checker approval, reconciliation and reversal process |
 | AI | Model/version pinning, prompt registry, evaluation gates, grounded evidence, low-confidence escalation, output schema validation |
 | Audit | Database permissions preventing update/delete, external WORM export, clock synchronization, SIEM alerts |

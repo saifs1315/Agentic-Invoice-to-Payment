@@ -1,330 +1,600 @@
 openapi: 3.1.0
 info:
   title: LedgerPilot API
-  version: 0.1.0
-  description: Auditable AP invoice and AR remittance automation prototype.
-servers:
-  - url: http://localhost:8000
+  description: Auditable agentic invoice-to-payment and remittance automation
+  version: 0.2.0
 paths:
   /api/v1/ingest-invoice:
     post:
-      tags: [AP]
-      summary: Ingest and extract an invoice attachment
-      operationId: ingestInvoice
+      tags:
+      - AP
+      summary: Ingest Invoice
+      operationId: ingest_invoice_api_v1_ingest_invoice_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_ingest_invoice_api_v1_ingest_invoice_post'
+        required: true
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Ingest Invoice Api V1 Ingest Invoice Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/match-po:
+    post:
+      tags:
+      - AP
+      summary: Match Po
+      operationId: match_po_api_v1_match_po_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MatchRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Match Po Api V1 Match Po Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/post-payment-journal:
+    post:
+      tags:
+      - AP
+      summary: Post Payment Journal
+      operationId: post_payment_journal_api_v1_post_payment_journal_post
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Post Payment Journal Api V1 Post Payment Journal Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/exceptions/decision:
+    post:
+      tags:
+      - Human oversight
+      summary: Exception Decision
+      operationId: exception_decision_api_v1_exceptions_decision_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DecisionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Exception Decision Api V1 Exceptions Decision Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/exceptions:
+    get:
+      tags:
+      - Human oversight
+      summary: List Exceptions
+      operationId: list_exceptions_api_v1_exceptions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+                title: Response List Exceptions Api V1 Exceptions Get
+  /api/v1/workflows/{invoice_id}:
+    get:
+      tags:
+      - Operations
+      summary: Workflow Status
+      operationId: workflow_status_api_v1_workflows__invoice_id__get
+      parameters:
+      - name: invoice_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Invoice Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Workflow Status Api V1 Workflows  Invoice Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/ingest-document:
+    post:
+      tags:
+      - Ingestion
+      summary: Ingest Document
+      operationId: ingest_document_api_v1_ingest_document_post
+      parameters:
+      - name: workflow_hint
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - $ref: '#/components/schemas/DocumentKind'
+          - type: 'null'
+          title: Workflow Hint
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
-              type: object
-              required: [file]
-              properties:
-                file: {type: string, format: binary}
+              $ref: '#/components/schemas/Body_ingest_document_api_v1_ingest_document_post'
       responses:
-        "202":
-          description: Invoice accepted and extracted
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/IngestResponse"}
-        "413": {description: Attachment exceeds configured maximum}
-        "422": {description: Required invoice fields could not be extracted}
-  /api/v1/match-po:
-    post:
-      tags: [AP]
-      summary: Perform a two-way or three-way match
-      operationId: matchPurchaseOrder
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/MatchRequest"}
-      responses:
-        "200":
-          description: Match result and routing decision
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/MatchResponse"}
-        "404": {description: Invoice not found}
-  /api/v1/post-payment-journal:
-    post:
-      tags: [AP]
-      summary: Post a matched and approved invoice to the ERP
-      operationId: postPaymentJournal
-      parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema: {type: string, minLength: 1}
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/PostRequest"}
-      responses:
-        "200":
-          description: Journal posted or the original idempotent result returned
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/Journal"}
-        "404": {description: Invoice not found}
-        "409": {description: Match or approval precondition is not satisfied}
-  /api/v1/audit-log:
-    get:
-      tags: [Audit]
-      summary: Retrieve the verifiable audit trail
-      operationId: getAuditLog
-      parameters:
-        - {name: entity_id, in: query, required: false, schema: {type: string}}
-        - {name: limit, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 1000, default: 100}}
-      responses:
-        "200":
-          description: Hash-chain status and audit events
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/AuditResponse"}
-  /api/v1/health:
-    get:
-      tags: [Operations]
-      summary: Check service and audit-ledger health
-      operationId: getHealth
-      responses:
-        "200":
-          description: Service is healthy
+        '202':
+          description: Successful Response
           content:
             application/json:
               schema:
                 type: object
-                required: [status, version, database, audit_chain_valid]
-                properties:
-                  status: {type: string, const: ok}
-                  version: {type: string}
-                  environment: {type: string}
-                  database: {type: string, enum: [memory, postgresql]}
-                  erp: {type: string}
-                  audit_chain_valid: {type: boolean}
-  /api/v1/workflows/{invoice_id}:
-    get:
-      tags: [Operations]
-      summary: Inspect the latest durable workflow node and state
-      operationId: getWorkflowStatus
-      parameters:
-        - {name: invoice_id, in: path, required: true, schema: {type: string}}
-      responses:
-        "200":
-          description: Latest workflow state
+                additionalProperties: true
+                title: Response Ingest Document Api V1 Ingest Document Post
+        '422':
+          description: Validation Error
           content:
             application/json:
-              schema: {type: object, additionalProperties: true}
-        "404": {description: Invoice not found}
-  /api/v1/exceptions:
-    get:
-      tags: [Human oversight]
-      summary: List invoices awaiting review
-      responses:
-        "200":
-          description: Exception queue
-          content:
-            application/json:
-              schema: {type: array, items: {$ref: "#/components/schemas/ExceptionInvoice"}}
-  /api/v1/exceptions/decision:
-    post:
-      tags: [Human oversight]
-      summary: Approve or reject an invoice exception
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/DecisionRequest"}
-      responses:
-        "200": {description: Decision recorded}
-        "409": {description: Invoice is not awaiting a human decision}
-        "404": {description: Invoice not found}
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/ingest-remittance:
     post:
-      tags: [AR]
-      summary: Match a remittance to open AR items and apply cash
+      tags:
+      - AR
+      summary: Ingest Remittance
+      operationId: ingest_remittance_api_v1_ingest_remittance_post
       requestBody:
-        required: true
         content:
           application/json:
-            schema: {$ref: "#/components/schemas/RemittanceRequest"}
+            schema:
+              $ref: '#/components/schemas/RemittanceRequest'
+        required: true
       responses:
-        "202": {description: Remittance processed or routed to exception}
-        "422": {description: Remittance validation failed}
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Ingest Remittance Api V1 Ingest Remittance Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
   /api/v1/remittance-exceptions:
     get:
-      tags: [AR, Human oversight]
-      summary: List failed remittance applications for operator follow-up
+      tags:
+      - AR
+      - Human oversight
+      summary: List Remittance Exceptions
+      operationId: list_remittance_exceptions_api_v1_remittance_exceptions_get
       responses:
-        "200":
-          description: Read-only AR exception queue
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+                title: Response List Remittance Exceptions Api V1 Remittance Exceptions
+                  Get
+  /api/v1/remittance-exceptions/decision:
+    post:
+      tags:
+      - AR
+      - Human oversight
+      summary: Remittance Exception Decision
+      operationId: remittance_exception_decision_api_v1_remittance_exceptions_decision_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ARDecisionRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Remittance Exception Decision Api V1 Remittance Exceptions
+                  Decision Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/finance-exceptions:
+    get:
+      tags:
+      - Human oversight
+      summary: List Finance Exceptions
+      operationId: list_finance_exceptions_api_v1_finance_exceptions_get
+      parameters:
+      - name: workflow_type
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workflow Type
+      responses:
+        '200':
+          description: Successful Response
           content:
             application/json:
               schema:
                 type: array
-                items: {$ref: "#/components/schemas/RemittanceExceptionRecord"}
+                items:
+                  type: object
+                  additionalProperties: true
+                title: Response List Finance Exceptions Api V1 Finance Exceptions
+                  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/audit-log:
+    get:
+      tags:
+      - Audit
+      summary: Audit Log
+      operationId: audit_log_api_v1_audit_log_get
+      parameters:
+      - name: entity_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Entity Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Audit Log Api V1 Audit Log Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /api/v1/health:
+    get:
+      tags:
+      - Operations
+      summary: Health
+      operationId: health_api_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Health Api V1 Health Get
   /api/v1/mailbox/poll:
     post:
-      tags: [Ingestion]
-      summary: Poll the configured Microsoft Graph shared mailbox
+      tags:
+      - Ingestion
+      summary: Poll Mailbox
+      operationId: poll_mailbox_api_v1_mailbox_poll_post
       parameters:
-        - {name: max_messages, in: query, required: false, schema: {type: integer, minimum: 1, maximum: 100, default: 10}}
+      - name: max_messages
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+          title: Max Messages
       responses:
-        "200": {description: Mailbox scan summary}
-        "503": {description: Graph credentials are unavailable}
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Poll Mailbox Api V1 Mailbox Poll Post
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
 components:
   schemas:
-    InvoiceLine:
-      type: object
-      required: [description, quantity, unit_price, amount]
+    ARCorrections:
       properties:
-        description: {type: string}
-        quantity: {type: string}
-        unit_price: {type: string}
-        amount: {type: string}
-        po_line: {type: [integer, "null"]}
-    Invoice:
-      type: object
-      required: [id, vendor_id, invoice_number, invoice_date, currency, total, lines, source_ref, status]
-      properties:
-        id: {type: string}
-        vendor_id: {type: string}
-        invoice_number: {type: string}
-        invoice_date: {type: string, format: date}
-        currency: {type: string, minLength: 3, maxLength: 3}
-        total: {type: string}
-        po_number: {type: [string, "null"]}
-        lines: {type: array, items: {$ref: "#/components/schemas/InvoiceLine"}}
-        source_ref: {type: string}
-        status: {type: string}
-        confidence: {type: number, minimum: 0, maximum: 1}
-        evidence: {type: object, additionalProperties: {type: string}}
-        subtotal: {type: [string, "null"]}
-        tax_amount: {type: string}
-        freight_amount: {type: string}
-        discount_amount: {type: string}
-        extraction_mode: {type: string}
-        extraction_attempts:
-          type: array
-          items:
-            type: object
-            additionalProperties: {type: string}
-        created_at: {type: string, format: date-time}
-    IngestResponse:
-      type: object
-      required: [invoice, next_action]
-      properties:
-        invoice: {$ref: "#/components/schemas/Invoice"}
-        next_action: {type: string}
-    ExceptionInvoice:
-      allOf:
-        - {$ref: "#/components/schemas/Invoice"}
-        - type: object
-          properties:
-            match:
-              oneOf:
-                - {$ref: "#/components/schemas/MatchResult"}
-                - {type: "null"}
-    MatchRequest:
-      type: object
-      required: [invoice_id]
-      properties:
-        invoice_id: {type: string}
-        require_goods_receipt: {type: boolean, default: true}
-    Variance:
-      type: object
-      required: [code, field, message, blocking]
-      properties:
-        code: {type: string}
-        field: {type: string}
-        expected: {type: [string, "null"]}
-        actual: {type: [string, "null"]}
-        variance_pct: {type: [number, "null"]}
-        message: {type: string}
-        blocking: {type: boolean}
-    MatchResult:
-      type: object
-      required: [id, invoice_id, match_type, matched, variances]
-      properties:
-        id: {type: string}
-        invoice_id: {type: string}
-        match_type: {type: string, enum: [2-way, 3-way]}
-        matched: {type: boolean}
-        variances: {type: array, items: {$ref: "#/components/schemas/Variance"}}
-        po_number: {type: [string, "null"]}
-        created_at: {type: string, format: date-time}
-    MatchResponse:
-      type: object
-      required: [result, next_action]
-      properties:
-        result: {$ref: "#/components/schemas/MatchResult"}
-        next_action: {type: string}
-        journal:
-          oneOf:
-            - {$ref: "#/components/schemas/Journal"}
-            - {type: "null"}
-        policies: {type: array, items: {type: string}}
-        explanation: {type: string}
-    PostRequest:
-      type: object
-      required: [invoice_id]
-      properties:
-        invoice_id: {type: string}
-    Journal:
-      type: object
-      required: [journal_id, invoice_id, vendor_id, amount, currency, status, idempotency_key]
-      properties:
-        journal_id: {type: string}
-        invoice_id: {type: string}
-        vendor_id: {type: string}
-        amount: {type: string}
-        currency: {type: string}
-        status: {type: string, const: posted}
-        idempotency_key: {type: string}
-    DecisionRequest:
-      type: object
-      required: [invoice_id, approved, actor, comment]
-      properties:
-        invoice_id: {type: string}
-        approved: {type: boolean}
-        actor: {type: string, minLength: 3}
-        comment: {type: string, minLength: 3}
-    RemittanceRequest:
-      type: object
-      required: [customer_id, reference, amount, open_item_refs]
-      properties:
-        customer_id: {type: string}
-        reference: {type: string}
+        customer_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Customer Id
+        reference:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reference
         amount:
           anyOf:
-            - {type: number, exclusiveMinimum: 0, maximum: 1000000000}
-            - {type: string, pattern: '^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$'}
-          description: Positive decimal amount bounded by the configured monetary ceiling.
-        currency: {type: string, pattern: '^[A-Z]{3}$', default: USD}
-        open_item_refs: {type: array, items: {type: string}}
-        source_ref: {type: string, default: api}
-    RemittanceExceptionRecord:
+          - type: number
+            maximum: 1000000000.0
+            exclusiveMinimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          - type: 'null'
+          title: Amount
+        currency:
+          anyOf:
+          - type: string
+            pattern: ^[A-Z]{3}$
+          - type: 'null'
+          title: Currency
+        open_item_refs:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Open Item Refs
       type: object
-      required: [remittance, result]
+      title: ARCorrections
+    ARDecisionRequest:
       properties:
-        remittance: {type: object, additionalProperties: true}
-        result: {type: object, additionalProperties: true}
-    AuditEvent:
+        remittance_id:
+          type: string
+          title: Remittance Id
+        action:
+          type: string
+          pattern: ^(RETRY_WITH_CORRECTION|REJECT|MARK_MANUALLY_RESOLVED|APPROVE_APPLY)$
+          title: Action
+        actor:
+          type: string
+          minLength: 3
+          title: Actor
+        comment:
+          type: string
+          minLength: 3
+          title: Comment
+        corrections:
+          anyOf:
+          - $ref: '#/components/schemas/ARCorrections'
+          - type: 'null'
       type: object
-      required: [id, entity_type, entity_id, action, actor, payload, previous_hash, event_hash, timestamp]
+      required:
+      - remittance_id
+      - action
+      - actor
+      - comment
+      title: ARDecisionRequest
+    Body_ingest_document_api_v1_ingest_document_post:
       properties:
-        id: {type: string}
-        entity_type: {type: string}
-        entity_id: {type: string}
-        action: {type: string}
-        actor: {type: string}
-        payload: {type: object, additionalProperties: true}
-        previous_hash: {type: string}
-        event_hash: {type: string}
-        timestamp: {type: string, format: date-time}
-    AuditResponse:
+        file:
+          type: string
+          format: binary
+          title: File
       type: object
-      required: [chain_valid, events]
+      required:
+      - file
+      title: Body_ingest_document_api_v1_ingest_document_post
+    Body_ingest_invoice_api_v1_ingest_invoice_post:
       properties:
-        chain_valid: {type: boolean}
-        events: {type: array, items: {$ref: "#/components/schemas/AuditEvent"}}
+        file:
+          type: string
+          format: binary
+          title: File
+      type: object
+      required:
+      - file
+      title: Body_ingest_invoice_api_v1_ingest_invoice_post
+    DecisionRequest:
+      properties:
+        invoice_id:
+          type: string
+          title: Invoice Id
+        approved:
+          type: boolean
+          title: Approved
+        actor:
+          type: string
+          minLength: 3
+          title: Actor
+        comment:
+          type: string
+          minLength: 3
+          title: Comment
+      type: object
+      required:
+      - invoice_id
+      - approved
+      - actor
+      - comment
+      title: DecisionRequest
+    DocumentKind:
+      type: string
+      enum:
+      - ap_invoice
+      - ar_remittance
+      - unknown
+      title: DocumentKind
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    MatchRequest:
+      properties:
+        invoice_id:
+          type: string
+          title: Invoice Id
+        require_goods_receipt:
+          type: boolean
+          title: Require Goods Receipt
+          default: true
+      type: object
+      required:
+      - invoice_id
+      title: MatchRequest
+    PostRequest:
+      properties:
+        invoice_id:
+          type: string
+          title: Invoice Id
+      type: object
+      required:
+      - invoice_id
+      title: PostRequest
+    RemittanceRequest:
+      properties:
+        customer_id:
+          type: string
+          title: Customer Id
+        reference:
+          type: string
+          title: Reference
+        amount:
+          anyOf:
+          - type: number
+            maximum: 1000000000.0
+            exclusiveMinimum: 0.0
+          - type: string
+            pattern: ^(?!^[-+.]*$)[+-]?0*\d*\.?\d*$
+          title: Amount
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          title: Currency
+          default: USD
+        open_item_refs:
+          items:
+            type: string
+          type: array
+          title: Open Item Refs
+        source_ref:
+          type: string
+          title: Source Ref
+          default: api
+      type: object
+      required:
+      - customer_id
+      - reference
+      - amount
+      - open_item_refs
+      title: RemittanceRequest
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError

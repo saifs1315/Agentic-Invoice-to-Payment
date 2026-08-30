@@ -31,6 +31,8 @@ class Settings:
     llm_extraction_enabled: bool = _bool("LLM_EXTRACTION_ENABLED", False)
     llm_explanations_enabled: bool = _bool("LLM_EXPLANATIONS_ENABLED", False)
     erp_mode: str = os.getenv("ERP_MODE", "mock")
+    erp_base_url: str = os.getenv("ERP_BASE_URL", "http://localhost:8080")
+    erp_timeout_seconds: float = float(os.getenv("ERP_TIMEOUT_SECONDS", "5.0"))
     price_tolerance_pct: float = float(os.getenv("MATCH_PRICE_TOLERANCE_PCT", "2.0"))
     quantity_tolerance_pct: float = float(os.getenv("MATCH_QUANTITY_TOLERANCE_PCT", "0.0"))
     total_tolerance_pct: float = float(os.getenv("MATCH_TOTAL_TOLERANCE_PCT", "2.0"))

@@ -1,0 +1,11 @@
+[
+  {"file":"fixtures/remittance-clean.json","expected_fields":{"customer_id":"CUST-001","reference":"REM-JSON-CLEAN","amount":"1000.00","currency":"USD"},"expected_match":true,"expected_exception":null},
+  {"file":"fixtures/remittance-currency-mismatch.json","expected_fields":{"customer_id":"CUST-001","reference":"REM-JSON-CURRENCY","amount":"1000.00","currency":"EUR"},"expected_match":false,"expected_exception":"CURRENCY_MISMATCH"},
+  {"file":"fixtures/remittance-partial.json","expected_fields":{"customer_id":"CUST-001","reference":"REM-JSON-PARTIAL","amount":"900.00","currency":"USD"},"expected_match":false,"expected_exception":"PARTIAL_REMITTANCE"},
+  {"file":"fixtures/remittance-overpayment.json","expected_fields":{"customer_id":"CUST-001","reference":"REM-JSON-OVER","amount":"1100.00","currency":"USD"},"expected_match":false,"expected_exception":"OVERPAYMENT"},
+  {"file":"fixtures/remittance-missing-item.json","expected_fields":{"customer_id":"CUST-001","reference":"REM-JSON-MISSING","amount":"1000.00","currency":"USD"},"expected_match":false,"expected_exception":"OPEN_ITEM_NOT_FOUND"},
+  {"file":"fixtures/remittance-clean.txt","expected_fields":{"customer_id":"CUST-001","reference":"REM-TEXT-001","amount":"1000.00","currency":"USD"},"expected_match":true,"expected_exception":null},
+  {"file":"fixtures/remittance-clean.pdf","expected_fields":{"customer_id":"CUST-001","reference":"REM-PDF-001","amount":"1000.00","currency":"USD"},"expected_match":true,"expected_exception":null},
+  {"file":"fixtures/remittance-clean.png","expected_fields":{"customer_id":"CUST-001","reference":"REM-SCAN-001","amount":"1000.00","currency":"USD"},"expected_match":true,"expected_exception":null},
+  {"file":"fixtures/remittance-clean.html","expected_fields":{"customer_id":"CUST-001","reference":"REM-HTML-001","amount":"1000.00","currency":"USD"},"expected_match":true,"expected_exception":null}
+]

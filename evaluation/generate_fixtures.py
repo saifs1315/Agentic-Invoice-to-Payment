@@ -135,8 +135,46 @@ def create_scan(path: Path) -> None:
     canvas.rotate(0.35, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=242).save(path, "PNG")
 
 
+def create_remittance_pdf(path: Path) -> None:
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(str(path), pagesize=A4, title="Synthetic AR remittance")
+    story = [
+        Paragraph("<b>CONTOSO CUSTOMER PAYMENT ADVICE</b>", styles["Title"]),
+        Paragraph("Synthetic evaluation document - no real financial data", styles["Normal"]),
+        Spacer(1, 8 * mm),
+        Paragraph("Customer ID: CUST-001", styles["Normal"]),
+        Paragraph("Remittance Reference: REM-PDF-001", styles["Normal"]),
+        Paragraph("Payment Amount: 1000.00", styles["Normal"]),
+        Paragraph("Currency: USD", styles["Normal"]),
+        Paragraph("Open Items: AR-9001, AR-9002", styles["Normal"]),
+    ]
+    doc.build(story)
+
+
+def create_remittance_scan(path: Path) -> None:
+    canvas = Image.new("L", (1500, 1500), 255)
+    draw = ImageDraw.Draw(canvas)
+    body = load_font(42)
+    title = load_font(55, bold=True)
+    draw.rectangle((70, 70, 1430, 1430), outline=80, width=3)
+    draw.text((120, 125), "CUSTOMER PAYMENT ADVICE", font=title, fill=15)
+    rows = [
+        "Customer ID: CUST-001",
+        "Remittance Reference: REM-SCAN-001",
+        "Payment Amount: 1000.00",
+        "Currency: USD",
+        "Open Items: AR-9001, AR-9002",
+    ]
+    for index, row in enumerate(rows):
+        draw.text((125, 340 + index * 115), row, font=body, fill=25)
+    draw.text((125, 1050), "Synthetic evaluation document", font=body, fill=70)
+    canvas.save(path, "PNG")
+
+
 if __name__ == "__main__":
     ROOT.mkdir(parents=True, exist_ok=True)
     create_pdf(ROOT / "po-1001-clean.pdf", "INV-2026-010", "1000.00", "100.00")
     create_pdf(ROOT / "po-1001-price-variance.pdf", "INV-2026-011", "1100.00", "110.00")
     create_scan(ROOT / "po-1001-scan.png")
+    create_remittance_pdf(ROOT / "remittance-clean.pdf")
+    create_remittance_scan(ROOT / "remittance-clean.png")

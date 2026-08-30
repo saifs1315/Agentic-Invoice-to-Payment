@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS finance_workflow_runs (
+    entity_id TEXT PRIMARY KEY,
+    workflow_type TEXT NOT NULL CHECK (workflow_type IN ('ap', 'ar', 'classification')),
+    source_ref TEXT,
+    current_node TEXT NOT NULL,
+    status TEXT NOT NULL,
+    state JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS payment_journals (
     id TEXT PRIMARY KEY,
     invoice_id TEXT NOT NULL REFERENCES invoices(id),
@@ -88,3 +98,4 @@ CREATE INDEX IF NOT EXISTS invoices_vendor_number_idx ON invoices(vendor_id, inv
 CREATE INDEX IF NOT EXISTS audit_entity_idx ON audit_events(entity_id, sequence);
 CREATE INDEX IF NOT EXISTS source_embedding_hnsw_idx ON source_documents USING hnsw (embedding vector_cosine_ops);
 CREATE INDEX IF NOT EXISTS policy_embedding_hnsw_idx ON policy_documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS finance_workflow_status_idx ON finance_workflow_runs(workflow_type, status);

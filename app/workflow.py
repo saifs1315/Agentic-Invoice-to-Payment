@@ -6,7 +6,7 @@ from app.audit import AuditLedger
 from app.config import Settings
 from app.context import ContextRetriever
 from app.domain import Invoice, Status
-from app.erp import MockERP
+from app.erp import ERPClient
 from app.llm import DecisionExplainer
 from app.matching import match_invoice
 from app.repository import MemoryRepository
@@ -25,7 +25,7 @@ class WorkflowState(TypedDict, total=False):
 class InvoiceWorkflow:
     """LangGraph-orchestrated AP flow with deterministic financial controls."""
 
-    def __init__(self, repo: MemoryRepository, audit: AuditLedger, erp: MockERP, config: Settings) -> None:
+    def __init__(self, repo: MemoryRepository, audit: AuditLedger, erp: ERPClient, config: Settings) -> None:
         self.repo, self.audit, self.erp, self.config = repo, audit, erp, config
         self.context = ContextRetriever(repo)
         self.explainer = DecisionExplainer(config)
@@ -55,6 +55,15 @@ class InvoiceWorkflow:
 
     def _persist(self, node: str, state: WorkflowState) -> None:
         self.repo.save_workflow_state(state["invoice_id"], node, dict(state))
+        invoice = self.repo.get_invoice(state["invoice_id"])
+        self.repo.save_finance_workflow_state(
+            state["invoice_id"],
+            "ap",
+            node,
+            invoice.status.value if invoice else "unknown",
+            dict(state),
+            invoice.source_ref if invoice else None,
+        )
 
     def _graph_retrieve_policy(self, state: WorkflowState) -> WorkflowState:
         update: WorkflowState = {

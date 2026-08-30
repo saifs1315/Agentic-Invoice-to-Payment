@@ -29,7 +29,37 @@ class Status(StrEnum):
     AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
     REJECTED = "rejected"
+    RESOLVED = "resolved"
     POSTED = "posted"
+
+
+class DocumentKind(StrEnum):
+    AP_INVOICE = "ap_invoice"
+    AR_REMITTANCE = "ar_remittance"
+    UNKNOWN = "unknown"
+
+
+@dataclass(slots=True)
+class SourceEnvelope:
+    content: bytes
+    filename: str
+    media_type: str
+    source_ref: str
+    content_sha256: str
+    workflow_hint: DocumentKind | None = None
+    message_id: str | None = None
+
+
+@dataclass(slots=True)
+class CanonicalDocument:
+    source_ref: str
+    filename: str
+    media_type: str
+    text: str
+    processing_mode: str
+    processing_attempts: list[dict[str, str]]
+    kind: DocumentKind = DocumentKind.UNKNOWN
+    classification_reason: str = "not-classified"
 
 
 @dataclass(slots=True)
@@ -140,6 +170,11 @@ class Remittance:
     source_ref: str
     id: str = field(default_factory=lambda: uid("rem"))
     status: Status = Status.RECEIVED
+    confidence: float = 0.0
+    evidence: dict[str, str] = field(default_factory=dict)
+    extraction_mode: str = "structured"
+    extraction_attempts: list[dict[str, str]] = field(default_factory=list)
+    created_at: str = field(default_factory=now_iso)
 
     def to_dict(self) -> dict[str, Any]:
         return {**asdict(self), "amount": str(self.amount), "status": self.status.value}

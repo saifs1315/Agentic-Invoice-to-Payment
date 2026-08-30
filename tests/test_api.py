@@ -108,3 +108,42 @@ class APITests(TestCase):
             },
         )
         self.assertEqual(422, rejected.status_code)
+
+    def test_unified_document_endpoint_dispatches_and_reports_workflow_state(self):
+        payload = {
+            "vendor_id": "VEND-001",
+            "invoice_number": "INV-UNIFIED-API",
+            "invoice_date": "2026-08-30",
+            "currency": "USD",
+            "total": "1000.00",
+            "po_number": "PO-1001",
+            "lines": [
+                {
+                    "description": "Industrial sensors",
+                    "quantity": "10",
+                    "unit_price": "100.00",
+                    "amount": "1000.00",
+                    "po_line": 1,
+                }
+            ],
+        }
+        response = self.client.post(
+            "/api/v1/ingest-document",
+            files={"file": ("invoice.json", json.dumps(payload), "application/json")},
+        )
+        self.assertEqual(202, response.status_code)
+        body = response.json()
+        self.assertEqual("ap", body["workflow_type"])
+        self.assertEqual("ap_invoice", body["classification"]["kind"])
+        state = self.client.get(f"/api/v1/workflows/{body['entity_id']}")
+        self.assertEqual(200, state.status_code)
+        self.assertEqual("ap", state.json()["workflow_type"])
+
+    def test_unified_document_endpoint_routes_ambiguity_to_review(self):
+        response = self.client.post(
+            "/api/v1/ingest-document",
+            files={"file": ("note.txt", b"General finance note", "text/plain")},
+        )
+        self.assertEqual(202, response.status_code)
+        self.assertEqual("classification", response.json()["workflow_type"])
+        self.assertEqual("human-classification", response.json()["next_action"])

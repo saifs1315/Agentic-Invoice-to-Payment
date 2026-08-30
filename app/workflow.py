@@ -6,7 +6,7 @@ from app.audit import AuditLedger
 from app.config import Settings
 from app.context import ContextRetriever
 from app.domain import Invoice, Status
-from app.erp import ERPClient
+from app.erp import ERPClient, ERPError
 from app.llm import DecisionExplainer
 from app.matching import match_invoice
 from app.repository import MemoryRepository
@@ -20,6 +20,7 @@ class WorkflowState(TypedDict, total=False):
     explanation: str
     next_action: str
     journal: dict[str, Any]
+    error: dict[str, Any]
 
 
 class InvoiceWorkflow:
@@ -142,7 +143,17 @@ class InvoiceWorkflow:
         policies: list[str],
     ) -> tuple[dict[str, Any], str]:
         invoice = self._invoice_or_raise(invoice_id)
-        po = self.erp.get_purchase_order(invoice.po_number)
+        try:
+            po = self.erp.get_purchase_order(invoice.po_number)
+        except ERPError as exc:
+            self.audit.append(
+                "invoice",
+                invoice.id,
+                "erp_lookup_failed",
+                "agent:matcher",
+                {"error_type": type(exc).__name__, "reason": str(exc)},
+            )
+            raise
         duplicate = (
             self.repo.find_duplicate(
                 invoice.vendor_id,
@@ -183,7 +194,14 @@ class InvoiceWorkflow:
         return result.to_dict(), explanation
 
     def match(self, invoice_id: str, require_goods_receipt: bool = True) -> dict[str, Any]:
-        self._invoice_or_raise(invoice_id)
+        invoice = self._invoice_or_raise(invoice_id)
+        if invoice.status in {
+            Status.APPROVED,
+            Status.REJECTED,
+            Status.RESOLVED,
+            Status.POSTED,
+        }:
+            raise ValueError(f"invoice in terminal status {invoice.status.value} cannot be re-matched")
         initial: WorkflowState = {
             "invoice_id": invoice_id,
             "require_goods_receipt": require_goods_receipt,
@@ -233,7 +251,22 @@ class InvoiceWorkflow:
             raise ValueError("invoice does not have a successful match or explicit exception approval")
         if self.config.require_human_approval and invoice.status != Status.APPROVED:
             raise ValueError("human approval is required before posting")
-        journal = self.erp.post_payment_journal(invoice, idempotency_key)
+        try:
+            journal = self.erp.post_payment_journal(invoice, idempotency_key)
+        except ERPError as exc:
+            error = {"error_type": type(exc).__name__, "reason": str(exc)}
+            self.audit.append(
+                "invoice",
+                invoice.id,
+                "payment_journal_blocked",
+                actor,
+                {**error, "idempotency_key": idempotency_key},
+            )
+            self._persist(
+                "payment_journal_blocked",
+                {"invoice_id": invoice.id, "next_action": "retry-erp", "error": error},
+            )
+            raise
         invoice.status = Status.POSTED
         self.repo.save_invoice(invoice)
         self.repo.save_journal(journal)

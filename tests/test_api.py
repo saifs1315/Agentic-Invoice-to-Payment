@@ -1,9 +1,13 @@
 import json
 from unittest import TestCase
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from app.api import app
+from app.bootstrap import audit, workflow
+from app.config import settings
+from app.erp import ERPUnavailableError
 
 
 class APITests(TestCase):
@@ -14,12 +18,96 @@ class APITests(TestCase):
         health = self.client.get("/api/v1/health")
         self.assertEqual(200, health.status_code)
         self.assertTrue(health.json()["audit_chain_valid"])
+        self.assertTrue(health.json()["capabilities"]["langgraph_active"])
+        self.assertTrue(health.json()["capabilities"]["llamaindex_active"])
         missing = self.client.post(
             "/api/v1/post-payment-journal",
             headers={"Idempotency-Key": "missing"},
             json={"invoice_id": "inv_missing"},
         )
         self.assertEqual(404, missing.status_code)
+
+    def test_posted_invoice_cannot_be_rematched_through_api(self):
+        payload = {
+            "vendor_id": "VEND-001",
+            "invoice_number": "INV-API-TERMINAL-GUARD",
+            "invoice_date": "2026-08-30",
+            "currency": "USD",
+            "total": "1000.00",
+            "po_number": "PO-1001",
+            "lines": [
+                {
+                    "description": "Industrial sensors",
+                    "quantity": "10",
+                    "unit_price": "100.00",
+                    "amount": "1000.00",
+                    "po_line": 1,
+                }
+            ],
+        }
+        ingested = self.client.post(
+            "/api/v1/ingest-invoice",
+            files={"file": ("invoice.json", json.dumps(payload), "application/json")},
+        )
+        invoice_id = ingested.json()["invoice"]["id"]
+        first_match = self.client.post(
+            "/api/v1/match-po",
+            json={"invoice_id": invoice_id, "require_goods_receipt": True},
+        )
+        rematch = self.client.post(
+            "/api/v1/match-po",
+            json={"invoice_id": invoice_id, "require_goods_receipt": False},
+        )
+
+        self.assertEqual(200, first_match.status_code)
+        self.assertEqual(409, rematch.status_code)
+        exceptions = self.client.get("/api/v1/exceptions").json()
+        self.assertNotIn(invoice_id, {item["id"] for item in exceptions})
+
+    def test_erp_failure_returns_503_and_is_audited(self):
+        payload = {
+            "vendor_id": "VEND-001",
+            "invoice_number": "INV-API-ERP-FAILURE",
+            "invoice_date": "2026-08-30",
+            "currency": "USD",
+            "total": "1000.00",
+            "po_number": "PO-1001",
+            "lines": [
+                {
+                    "description": "Industrial sensors",
+                    "quantity": "10",
+                    "unit_price": "100.00",
+                    "amount": "1000.00",
+                    "po_line": 1,
+                }
+            ],
+        }
+        ingested = self.client.post(
+            "/api/v1/ingest-invoice",
+            files={"file": ("invoice.json", json.dumps(payload), "application/json")},
+        )
+        invoice_id = ingested.json()["invoice"]["id"]
+        with patch.object(
+            workflow.erp,
+            "post_payment_journal",
+            side_effect=ERPUnavailableError("ERP API unavailable (503)"),
+        ):
+            failed = self.client.post(
+                "/api/v1/match-po",
+                json={"invoice_id": invoice_id, "require_goods_receipt": True},
+            )
+
+        self.assertEqual(503, failed.status_code)
+        actions = {event["action"] for event in audit.list(invoice_id)}
+        self.assertIn("payment_journal_blocked", actions)
+
+    def test_upload_limit_rejects_content_beyond_configured_size(self):
+        oversized = b"x" * (settings.max_upload_mb * 1024 * 1024 + 1)
+        response = self.client.post(
+            "/api/v1/ingest-document",
+            files={"file": ("oversized.txt", oversized, "text/plain")},
+        )
+        self.assertEqual(413, response.status_code)
 
     def test_ingest_match_post_and_audit_api(self):
         payload = {

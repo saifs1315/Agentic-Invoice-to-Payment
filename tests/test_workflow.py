@@ -4,7 +4,7 @@ from unittest import TestCase
 
 from app.audit import AuditLedger
 from app.config import Settings
-from app.erp import MockERP
+from app.erp import ERPUnavailableError, MockERP
 from app.extraction import extract_invoice
 from app.domain import Status
 from app.repository import MemoryRepository
@@ -55,3 +55,36 @@ class WorkflowTests(TestCase):
         workflow.approve(self.invoice.id, "reviewer:test", True, "Validated against evidence")
         journal = workflow.post(self.invoice.id, "approval-required")
         self.assertEqual("posted", journal["status"])
+
+    def test_posted_invoice_cannot_be_regressed_by_rematching(self):
+        self.workflow.ingest(self.invoice)
+        self.workflow.match(self.invoice.id)
+        self.assertEqual(Status.POSTED, self.invoice.status)
+
+        with self.assertRaisesRegex(ValueError, "terminal status posted"):
+            self.workflow.match(self.invoice.id, require_goods_receipt=False)
+
+        self.assertEqual(Status.POSTED, self.invoice.status)
+        self.assertEqual([], self.repo.list_invoices(Status.EXCEPTION))
+
+    def test_erp_posting_failure_is_audited_and_persisted(self):
+        class FailingERP(MockERP):
+            def post_payment_journal(self, invoice, idempotency_key):
+                raise ERPUnavailableError("ERP API unavailable (503)")
+
+        workflow = InvoiceWorkflow(
+            self.repo,
+            self.audit,
+            FailingERP(),
+            Settings(auto_post_enabled=False),
+        )
+        workflow.ingest(self.invoice)
+        workflow.match(self.invoice.id)
+
+        with self.assertRaises(ERPUnavailableError):
+            workflow.post(self.invoice.id, "erp-failure")
+
+        events = self.audit.list(self.invoice.id)
+        self.assertEqual("payment_journal_blocked", events[-1]["action"])
+        self.assertEqual("payment_journal_blocked", self.repo.workflow_states[self.invoice.id]["node"])
+        self.assertEqual(Status.MATCHED, self.invoice.status)

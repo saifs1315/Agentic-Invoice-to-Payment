@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-LedgerPilot passed all 42 automated unit, API, control, workflow, context, and audit tests. The AP benchmark remains seven synthetic documents; the new AR benchmark adds nine documents across JSON, text, PDF, PNG, and HTML. AR scored 100% evaluation coverage, document classification, match decisions, exception classification, and audit-chain integrity, with 97.22% labeled field extraction due to one OCR field miss. No ineligible invoice was auto-posted and no invalid remittance caused cash application. A separate four-query policy dataset scored 100% RAGAS non-LLM context precision and recall.
+LedgerPilot passed all 49 automated unit, API, control, workflow, context, and audit tests. The AP benchmark remains seven synthetic documents; the AR benchmark adds nine documents across JSON, text, PDF, PNG, and HTML. AR scored 100% evaluation coverage, document classification, match decisions, exception classification, and audit-chain integrity, with 97.22% labeled field extraction due to one OCR field miss. No ineligible invoice was auto-posted and no invalid remittance caused cash application. A strengthened nine-query policy dataset scored 88.89% RAGAS non-LLM context precision and recall.
 
 These results demonstrate implementation correctness against known fixtures. They do not estimate production accuracy across diverse vendor layouts, scans, languages, handwriting, or adversarial documents.
 
@@ -40,7 +40,7 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 - **False auto-post rate:** ineligible documents automatically posted divided by all documents.
 - **Audit-chain integrity:** workflows whose recomputed SHA-256 links remain valid.
 - **Evaluation coverage:** documents completing extraction and workflow evaluation divided by all selected documents. Any failure makes the command exit non-zero.
-- **RAGAS context precision/recall:** non-LLM similarity metrics over four labeled finance-policy retrieval cases. RAGAS is applied to retrieval, not to deterministic numeric matching.
+- **RAGAS context precision/recall:** non-LLM similarity metrics over nine paraphrased, multi-policy, and out-of-domain finance-policy cases. RAGAS is applied to retrieval, not to deterministic numeric matching.
 - **AR document classification:** remittance documents correctly dispatched to the AR subgraph divided by AR documents.
 - **False cash-application rate:** ineligible remittances applied to open items divided by all AR documents.
 
@@ -57,8 +57,8 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 | False auto-post rate | 0.00% |
 | Mean extraction confidence | 92.29% |
 | Audit-chain integrity | 100.00% |
-| RAGAS non-LLM context precision | 100.00% |
-| RAGAS non-LLM context recall | 100.00% |
+| RAGAS non-LLM context precision | 88.89% |
+| RAGAS non-LLM context recall | 88.89% |
 
 ### AR results
 
@@ -78,7 +78,7 @@ AP per-format field and decision accuracy were 100% for JSON (3), PDF (2), PNG (
 
 ## Automated verification
 
-Forty-two tests cover the original AP controls plus shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, API dispatch, durable generic workflow state, and the unified exception surface.
+Forty-nine tests cover the original AP controls plus shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, terminal AP transition guards, audited ERP failures, non-PO override parity, runtime environment reloading, bounded uploads, API dispatch, durable generic workflow state, and the unified exception surface.
 
 ## Production pilot plan
 
@@ -88,7 +88,7 @@ Forty-two tests cover the original AP controls plus shared AP/AR classification,
 4. Stratify results by digital PDF, scan quality, language, page count, and line count.
 5. Measure false-STP rate separately and set a safety-first go-live threshold.
 6. Evaluate duplicate recall, exception routing precision, journal reconciliation, and time-to-resolution.
-7. Expand the four-case retrieval set with production policy chunks and add LLM-based faithfulness only when a governed evaluator model is available; retain the current deterministic RAGAS precision/recall gate.
+7. Expand the nine-case retrieval set with production policy chunks and add LLM-based faithfulness only when a governed evaluator model is available; retain the current deterministic RAGAS precision/recall gate.
 8. Run prompt-injection, altered-bank-detail, malformed-file, oversized-file, and adversarial OCR tests.
 
 ## Limitations
@@ -99,4 +99,5 @@ Forty-two tests cover the original AP controls plus shared AP/AR classification,
 - The ERP is a separate stateful Mock API over HTTP, not a vendor sandbox. Authentication, vendor-specific schemas, and realistic network latency are not measured.
 - Human-review timing and reviewer agreement are not measured.
 - Ollama extraction and Phoenix tracing remain optional profiles and require their services to be started.
+- The offline hash/lexical retriever missed one paraphrased posting-retry query in the nine-case set; a production pilot should replace it with a governed semantic embedding model and a substantially larger labeled corpus.
 - Cumulative prior invoicing per PO line is not modeled; partial invoices are checked against ordered and received upper bounds in the current transaction only.

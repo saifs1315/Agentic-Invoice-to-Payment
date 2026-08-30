@@ -5,7 +5,19 @@ from typing import Protocol
 
 import httpx
 
-from app.domain import Invoice, PurchaseOrder, PurchaseOrderLine, uid
+from app.domain import Invoice, PurchaseOrder, PurchaseOrderLine, Status, uid
+
+
+class ERPError(RuntimeError):
+    """Base exception for controlled ERP boundary failures."""
+
+
+class ERPConflictError(ERPError):
+    """The ERP rejected a request because current business state conflicts."""
+
+
+class ERPUnavailableError(ERPError):
+    """The ERP could not be reached or returned a server-side failure."""
 
 
 class ERPClient(Protocol):
@@ -120,15 +132,27 @@ class HttpERPClient:
         self.timeout = timeout
 
     def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        response = httpx.request(
-            method,
-            f"{self.base_url}{path}",
-            timeout=self.timeout,
-            **kwargs,
-        )
+        try:
+            response = httpx.request(
+                method,
+                f"{self.base_url}{path}",
+                timeout=self.timeout,
+                **kwargs,
+            )
+        except httpx.RequestError as exc:
+            raise ERPUnavailableError(f"ERP API request failed: {type(exc).__name__}") from exc
         if response.status_code >= 500:
-            raise RuntimeError(f"ERP API unavailable ({response.status_code})")
+            raise ERPUnavailableError(f"ERP API unavailable ({response.status_code})")
         return response
+
+    @staticmethod
+    def _conflict(response: httpx.Response) -> ERPConflictError:
+        try:
+            payload = response.json()
+            detail = payload.get("detail", payload) if isinstance(payload, dict) else payload
+        except ValueError:
+            detail = response.text or f"HTTP {response.status_code}"
+        return ERPConflictError(f"ERP rejected request: {detail}")
 
     def get_purchase_order(self, number: str | None) -> PurchaseOrder | None:
         if not number:
@@ -136,11 +160,13 @@ class HttpERPClient:
         po_response = self._request("GET", f"/erp/v1/purchase-orders/{number}")
         if po_response.status_code == 404:
             return None
-        po_response.raise_for_status()
+        if po_response.status_code >= 400:
+            raise self._conflict(po_response)
         receipt_response = self._request(
             "GET", f"/erp/v1/purchase-orders/{number}/goods-receipts"
         )
-        receipt_response.raise_for_status()
+        if receipt_response.status_code >= 400:
+            raise self._conflict(receipt_response)
         receipts = {
             int(line["line_number"]): Decimal(str(line["received_quantity"]))
             for line in receipt_response.json()["lines"]
@@ -173,16 +199,19 @@ class HttpERPClient:
                 "amount": str(invoice.total),
                 "currency": invoice.currency,
                 "po_number": invoice.po_number,
+                "approved_exception": invoice.status == Status.APPROVED,
             },
         )
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise self._conflict(response)
         return response.json()
 
     def get_open_items(self, customer_id: str) -> list[dict]:
         response = self._request("GET", f"/erp/v1/customers/{customer_id}/open-items")
         if response.status_code == 404:
             return []
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise self._conflict(response)
         return response.json()["items"]
 
     def apply_cash(
@@ -208,5 +237,6 @@ class HttpERPClient:
         )
         if response.status_code == 409:
             return response.json().get("detail", response.json())
-        response.raise_for_status()
+        if response.status_code >= 400:
+            raise self._conflict(response)
         return response.json()

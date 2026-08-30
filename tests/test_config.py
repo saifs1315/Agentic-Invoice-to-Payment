@@ -32,3 +32,20 @@ class SettingsTests(TestCase):
                         "MAX_MONETARY_AMOUNT must be a valid.*decimal number",
                     ):
                         Settings()
+
+    def test_each_instance_reads_current_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                "MATCH_PRICE_TOLERANCE_PCT": "9.5",
+                "AUTO_POST_ENABLED": "false",
+                "ERP_MODE": "http",
+                "MAX_UPLOAD_MB": "7",
+            },
+        ):
+            configured = Settings()
+
+        self.assertEqual(9.5, configured.price_tolerance_pct)
+        self.assertFalse(configured.auto_post_enabled)
+        self.assertEqual("http", configured.erp_mode)
+        self.assertEqual(7, configured.max_upload_mb)

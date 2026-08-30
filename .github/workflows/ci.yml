@@ -18,8 +18,9 @@ jobs:
           key: easyocr-en-v1
       - run: pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 torchvision==0.23.0
       - run: pip install -e ".[dev,eval]"
-      - run: ruff check app tests evaluation
+      - run: ruff check app tests evaluation scripts
       - run: pytest --cov=app --cov-report=term-missing
       - run: python evaluation/run_evaluation.py
+      - run: python evaluation/run_ar_evaluation.py
       - run: python evaluation/run_rag_evaluation.py
       - run: docker compose config --quiet

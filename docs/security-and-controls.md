@@ -34,7 +34,9 @@ Prototype identity limitation: the review API records the supplied actor and com
 | Audit | Database permissions preventing update/delete, external WORM export, clock synchronization, SIEM alerts |
 | Operations | SLOs, incident response, disaster recovery, capacity tests, vulnerability and dependency scanning |
 
-## Threat-focused tests
+## Threat scenarios for production testing
+
+The list below is a threat register. Items explicitly marked as covered have automated prototype regression tests; the remainder belong in the production security test plan.
 
 - Vendor changes bank details inside invoice text.
 - PDF includes instructions intended to override the agent.
@@ -42,5 +44,5 @@ Prototype identity limitation: the review API records the supplied actor and com
 - Invoice total and line totals disagree. Covered by blocking `LINE_AMOUNT_MISMATCH`, `SUBTOTAL_MISMATCH`, and `INVOICE_TOTAL_MISMATCH` controls.
 - Currency symbol conflicts with the extracted currency code.
 - Invoice contains a PO belonging to another vendor.
-- Journal request is replayed after a timeout.
+- Journal request is replayed after a timeout. Covered by payment-journal idempotency tests.
 - Human approver attempts to approve and post outside their role or limit.

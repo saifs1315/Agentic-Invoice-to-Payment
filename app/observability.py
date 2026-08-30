@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
+
+
+logger = logging.getLogger(__name__)
 
 
 def configure_observability() -> bool:
@@ -14,5 +18,5 @@ def configure_observability() -> bool:
         register(project_name="ledgerpilot", endpoint=endpoint, auto_instrument=True)
         return True
     except Exception:
+        logger.exception("Phoenix/OpenTelemetry configuration failed")
         return False
-

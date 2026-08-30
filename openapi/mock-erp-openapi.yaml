@@ -230,6 +230,10 @@ components:
           - type: string
           - type: 'null'
           title: Po Number
+        approved_exception:
+          type: boolean
+          title: Approved Exception
+          default: false
       type: object
       required:
       - invoice_id

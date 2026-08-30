@@ -62,3 +62,26 @@ class MockERPAPITests(TestCase):
             json={**payload, "remittance_id": "rem_http_2", "currency": "EUR"},
         )
         self.assertEqual(409, mismatch.status_code)
+
+    def test_non_po_journal_requires_explicit_approved_exception(self):
+        payload = {
+            "invoice_id": "inv_non_po",
+            "vendor_id": "VEND-003",
+            "amount": "400.00",
+            "currency": "USD",
+            "po_number": None,
+        }
+        blocked = self.client.post(
+            "/erp/v1/payment-journals",
+            headers={"Idempotency-Key": "journal-non-po-blocked"},
+            json=payload,
+        )
+        approved = self.client.post(
+            "/erp/v1/payment-journals",
+            headers={"Idempotency-Key": "journal-non-po-approved"},
+            json={**payload, "approved_exception": True},
+        )
+
+        self.assertEqual(409, blocked.status_code)
+        self.assertEqual(200, approved.status_code)
+        self.assertTrue(approved.json()["approved_exception"])

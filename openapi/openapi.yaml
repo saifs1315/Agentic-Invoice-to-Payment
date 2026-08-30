@@ -52,6 +52,10 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Match Po Api V1 Match Po Post
+        '409':
+          description: ERP business-state conflict
+        '503':
+          description: ERP transport or server failure
         '422':
           description: Validation Error
           content:
@@ -86,6 +90,10 @@ paths:
                 type: object
                 additionalProperties: true
                 title: Response Post Payment Journal Api V1 Post Payment Journal Post
+        '409':
+          description: ERP business-state conflict
+        '503':
+          description: ERP transport or server failure
         '422':
           description: Validation Error
           content:
@@ -194,6 +202,10 @@ paths:
                 type: object
                 additionalProperties: true
                 title: Response Ingest Document Api V1 Ingest Document Post
+        '409':
+          description: ERP business-state conflict
+        '503':
+          description: ERP transport or server failure
         '422':
           description: Validation Error
           content:
@@ -221,6 +233,10 @@ paths:
                 additionalProperties: true
                 type: object
                 title: Response Ingest Remittance Api V1 Ingest Remittance Post
+        '409':
+          description: ERP business-state conflict
+        '503':
+          description: ERP transport or server failure
         '422':
           description: Validation Error
           content:
@@ -269,6 +285,10 @@ paths:
                 type: object
                 title: Response Remittance Exception Decision Api V1 Remittance Exceptions
                   Decision Post
+        '409':
+          description: ERP business-state conflict
+        '503':
+          description: ERP transport or server failure
         '422':
           description: Validation Error
           content:

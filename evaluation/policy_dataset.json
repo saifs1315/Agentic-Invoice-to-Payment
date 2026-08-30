@@ -1,18 +1,39 @@
 [
   {
-    "query": "Can a vendor invoice number be posted twice?",
+    "query": "A supplier resent the same invoice number under a different filename. Which control prevents paying it twice?",
     "reference_context_ids": ["policy-2"]
   },
   {
-    "query": "What quantity rule applies to a three-way match and goods received?",
+    "query": "The warehouse received eight units but the supplier billed ten. What evidence limits payment?",
     "reference_context_ids": ["policy-3"]
   },
   {
-    "query": "Must posting be approved, matched, and idempotent?",
+    "query": "A payable journal is retried after a timeout. Which approval and replay rule applies to posting?",
     "reference_context_ids": ["policy-4"]
   },
   {
-    "query": "What happens when an invoice has no purchase order?",
+    "query": "Finance receives a bill without a valid purchase order but records an authorized exception. Which rule governs it?",
     "reference_context_ids": ["policy-1"]
+  },
+  {
+    "query": "Which customer, currency, reference, and amount checks are required before allocating a remittance?",
+    "reference_context_ids": ["policy-5"]
+  },
+  {
+    "query": "After a bank-advice timeout, how should cash application prevent replay and re-check current open-item state?",
+    "reference_context_ids": ["policy-6"]
+  },
+  {
+    "query": "A partial remittance cannot be allocated cleanly. Should automation continue or require human resolution?",
+    "reference_context_ids": ["policy-7"]
+  },
+  {
+    "query": "Before applying a repeated customer remittance, which matching and replay controls both apply?",
+    "reference_context_ids": ["policy-5", "policy-6"]
+  },
+  {
+    "query": "What is the employee meal reimbursement limit?",
+    "reference_context_ids": [],
+    "expect_abstain": true
   }
 ]

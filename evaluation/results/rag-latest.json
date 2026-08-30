@@ -1,10 +1,10 @@
 {
-  "dataset_size": 4,
-  "ragas_non_llm_context_precision": 1.0,
-  "ragas_non_llm_context_recall": 1.0,
+  "dataset_size": 9,
+  "ragas_non_llm_context_precision": 0.8889,
+  "ragas_non_llm_context_recall": 0.8889,
   "cases": [
     {
-      "query": "Can a vendor invoice number be posted twice?",
+      "query": "A supplier resent the same invoice number under a different filename. Which control prevents paying it twice?",
       "retrieved_context_ids": [
         "policy-2"
       ],
@@ -15,7 +15,7 @@
       "context_recall": 1.0
     },
     {
-      "query": "What quantity rule applies to a three-way match and goods received?",
+      "query": "The warehouse received eight units but the supplier billed ten. What evidence limits payment?",
       "retrieved_context_ids": [
         "policy-3"
       ],
@@ -26,27 +26,81 @@
       "context_recall": 1.0
     },
     {
-      "query": "Must posting be approved, matched, and idempotent?",
+      "query": "A payable journal is retried after a timeout. Which approval and replay rule applies to posting?",
       "retrieved_context_ids": [
-        "policy-4"
+        "policy-3"
       ],
       "reference_context_ids": [
         "policy-4"
+      ],
+      "context_precision": 0.0,
+      "context_recall": 0.0
+    },
+    {
+      "query": "Finance receives a bill without a valid purchase order but records an authorized exception. Which rule governs it?",
+      "retrieved_context_ids": [
+        "policy-1"
+      ],
+      "reference_context_ids": [
+        "policy-1"
       ],
       "context_precision": 0.9999999999,
       "context_recall": 1.0
     },
     {
-      "query": "What happens when an invoice has no purchase order?",
+      "query": "Which customer, currency, reference, and amount checks are required before allocating a remittance?",
       "retrieved_context_ids": [
-        "policy-1"
+        "policy-5"
       ],
       "reference_context_ids": [
-        "policy-1"
+        "policy-5"
       ],
       "context_precision": 0.9999999999,
       "context_recall": 1.0
+    },
+    {
+      "query": "After a bank-advice timeout, how should cash application prevent replay and re-check current open-item state?",
+      "retrieved_context_ids": [
+        "policy-6"
+      ],
+      "reference_context_ids": [
+        "policy-6"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "query": "A partial remittance cannot be allocated cleanly. Should automation continue or require human resolution?",
+      "retrieved_context_ids": [
+        "policy-7"
+      ],
+      "reference_context_ids": [
+        "policy-7"
+      ],
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
+    },
+    {
+      "query": "Before applying a repeated customer remittance, which matching and replay controls both apply?",
+      "retrieved_context_ids": [
+        "policy-5",
+        "policy-6"
+      ],
+      "reference_context_ids": [
+        "policy-5",
+        "policy-6"
+      ],
+      "context_precision": 0.99999999995,
+      "context_recall": 1.0
+    },
+    {
+      "query": "What is the employee meal reimbursement limit?",
+      "retrieved_context_ids": [],
+      "reference_context_ids": [],
+      "context_precision": 1.0,
+      "context_recall": 1.0,
+      "abstained": true
     }
   ],
-  "notes": "Offline RAGAS non-LLM context precision and recall over labeled finance policies; no external LLM or embedding API is used."
+  "notes": "Offline RAGAS non-LLM context precision and recall over paraphrased, multi-policy, and out-of-domain cases; no external LLM or embedding API is used."
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.repository import MemoryRepository, POLICIES, deterministic_embedding
@@ -56,6 +57,17 @@ class ContextRetriever:
         return f"policy-{POLICIES.index(policy) + 1}"
 
     def retrieve_with_ids(self, query: str, top_k: int = 2) -> list[tuple[str, str]]:
+        stopwords = {"a", "an", "and", "are", "be", "is", "it", "of", "or", "the", "to", "what"}
+        query_terms = set(re.findall(r"[a-z0-9]+", query.lower())) - stopwords
+        policy_terms = {
+            term
+            for policy in POLICIES
+            for term in re.findall(r"[a-z0-9]+", policy.lower())
+            if term not in stopwords
+        }
+        if not query_terms & policy_terms:
+            return []
+
         rankings: list[list[str]] = []
         if self.index is not None:
             nodes = self.index.as_retriever(similarity_top_k=len(POLICIES)).retrieve(query)

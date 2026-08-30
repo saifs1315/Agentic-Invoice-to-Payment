@@ -23,6 +23,7 @@ class PaymentJournalRequest(BaseModel):
     amount: Decimal = Field(gt=0)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
     po_number: str | None = None
+    approved_exception: bool = False
 
 
 class CashApplicationRequest(BaseModel):
@@ -82,7 +83,10 @@ def payment_journal(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
 ) -> dict:
     po = erp.get_purchase_order(request.po_number)
-    if po is None or po.vendor_id != request.vendor_id or po.currency != request.currency:
+    approved_non_po = request.po_number is None and request.approved_exception
+    if not approved_non_po and (
+        po is None or po.vendor_id != request.vendor_id or po.currency != request.currency
+    ):
         raise HTTPException(409, "ERP revalidation failed for PO, vendor, or currency")
     invoice = Invoice(
         vendor_id=request.vendor_id,
@@ -95,7 +99,8 @@ def payment_journal(
         source_ref="mock-erp-api",
         id=request.invoice_id,
     )
-    return erp.post_payment_journal(invoice, idempotency_key)
+    journal = erp.post_payment_journal(invoice, idempotency_key)
+    return {**journal, "approved_exception": approved_non_po}
 
 
 @app.get("/erp/v1/customers/{customer_id}/open-items")

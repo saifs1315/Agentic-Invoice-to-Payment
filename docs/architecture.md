@@ -26,7 +26,7 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 2. The HTTP ERP client reads the PO and Goods Receipt endpoints and builds the matching facts.
 3. Deterministic code validates line arithmetic, invoice totals, duplicates, vendor/currency, tolerances, ordered quantities, and received quantities.
 4. A clean match follows approval policy and posts an idempotent Payment Journal through the Mock ERP HTTP API. Exceptions enter the human queue.
-5. The Mock ERP revalidates PO/vendor/currency at the posting boundary; audit events retain match evidence, policies, human decisions, and the ERP response.
+5. The Mock ERP revalidates PO/vendor/currency at the posting boundary. A missing-PO journal is accepted only when the workflow transmits an explicit previously recorded human exception approval; audit events retain match evidence, policies, human decisions, and the ERP response.
 
 ## AR subgraph
 
@@ -40,7 +40,10 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 - Upload validation failures return `422`; oversize files return `413`.
 - Missing records return `404`; invalid workflow transitions return `409`.
+- Posted, rejected, resolved, or already-approved AP invoices cannot be re-matched into an earlier state.
+- ERP business conflicts return `409`; transport/server failures return `503`. Failed lookup, journal, and cash operations are audited without advancing to a posted state.
 - ERP journal and cash posting use caller-supplied idempotency keys, making retries safe.
 - With automatic posting enabled, `/match-po` creates the journal with `auto:{invoice_id}`; a later call to the mandatory posting endpoint should use that authoritative key to demonstrate a replay.
-- Graph/ERP transport failures should be retried with bounded exponential backoff in a queue worker; the synchronous prototype surfaces them without silently advancing state.
-- If PostgreSQL is unavailable at startup, the local prototype uses the in-memory repository and reports that backend in `/health`. Production should fail closed instead.
+- Graph/ERP transport failures should be retried with bounded exponential backoff in a queue worker; the synchronous prototype returns a controlled error without silently advancing state.
+- If PostgreSQL is unavailable at startup, the local prototype logs the failure, uses the in-memory repository, and reports `degraded` plus the fallback type in `/health`. Production should fail closed instead.
+- `/health` uses the audit ledger's startup integrity result rather than re-hashing the unbounded event history every 30 seconds. Full chain recomputation remains available through `/api/v1/audit-log`.

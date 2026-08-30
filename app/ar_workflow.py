@@ -8,7 +8,7 @@ from app.audit import AuditLedger
 from app.config import Settings
 from app.context import ContextRetriever
 from app.domain import Remittance, Status
-from app.erp import ERPClient
+from app.erp import ERPClient, ERPError
 from app.repository import MemoryRepository
 
 
@@ -107,7 +107,17 @@ class RemittanceWorkflow:
 
     def _graph_match(self, state: ARWorkflowState) -> ARWorkflowState:
         remittance = self._remittance_or_raise(state["remittance_id"])
-        open_items = self.erp.get_open_items(remittance.customer_id)
+        try:
+            open_items = self.erp.get_open_items(remittance.customer_id)
+        except ERPError as exc:
+            self.audit.append(
+                "remittance",
+                remittance.id,
+                "ar_erp_lookup_failed",
+                "agent:ar-matcher",
+                {"error_type": type(exc).__name__, "reason": str(exc)},
+            )
+            raise
         duplicate = (
             self.repo.find_duplicate_remittance(
                 remittance.customer_id,
@@ -141,14 +151,29 @@ class RemittanceWorkflow:
 
     def _graph_apply(self, state: ARWorkflowState) -> ARWorkflowState:
         remittance = self._remittance_or_raise(state["remittance_id"])
-        application = self.erp.apply_cash(
-            remittance.customer_id,
-            remittance.amount,
-            remittance.currency,
-            remittance.open_item_refs,
-            f"auto:{remittance.id}",
-            remittance.id,
-        )
+        try:
+            application = self.erp.apply_cash(
+                remittance.customer_id,
+                remittance.amount,
+                remittance.currency,
+                remittance.open_item_refs,
+                f"auto:{remittance.id}",
+                remittance.id,
+            )
+        except ERPError as exc:
+            error = {"error_type": type(exc).__name__, "reason": str(exc)}
+            self.audit.append(
+                "remittance",
+                remittance.id,
+                "cash_application_blocked",
+                "agent:ar-poster",
+                error,
+            )
+            self._persist(
+                "cash_application_blocked",
+                {"remittance_id": remittance.id, "next_action": "retry-erp"},
+            )
+            raise
         result = {**state["result"], **application}
         remittance.status = Status.POSTED if application["applied"] else Status.EXCEPTION
         self.repo.save_remittance(remittance, result)

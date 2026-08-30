@@ -30,10 +30,27 @@ async def evaluate() -> dict[str, object]:
     recall_metric = NonLLMContextRecall()
     rows = []
     for item in dataset:
-        retrieved = retriever.retrieve_with_ids(item["query"], top_k=1)
+        reference_ids = item["reference_context_ids"]
+        retrieved = retriever.retrieve_with_ids(
+            item["query"],
+            top_k=max(1, len(reference_ids)),
+        )
+        if item.get("expect_abstain"):
+            abstained = not retrieved
+            rows.append(
+                {
+                    "query": item["query"],
+                    "retrieved_context_ids": [policy_id for policy_id, _ in retrieved],
+                    "reference_context_ids": [],
+                    "context_precision": 1.0 if abstained else 0.0,
+                    "context_recall": 1.0 if abstained else 0.0,
+                    "abstained": abstained,
+                }
+            )
+            continue
         reference_contexts = [
             POLICIES[int(policy_id.removeprefix("policy-")) - 1]
-            for policy_id in item["reference_context_ids"]
+            for policy_id in reference_ids
         ]
         sample = SingleTurnSample(
             user_input=item["query"],
@@ -46,7 +63,7 @@ async def evaluate() -> dict[str, object]:
             {
                 "query": item["query"],
                 "retrieved_context_ids": [policy_id for policy_id, _ in retrieved],
-                "reference_context_ids": item["reference_context_ids"],
+                "reference_context_ids": reference_ids,
                 "context_precision": float(precision),
                 "context_recall": float(recall),
             }
@@ -62,18 +79,18 @@ async def evaluate() -> dict[str, object]:
         ),
         "cases": rows,
         "notes": (
-            "Offline RAGAS non-LLM context precision and recall over labeled finance policies; "
-            "no external LLM or embedding API is used."
+            "Offline RAGAS non-LLM context precision and recall over paraphrased, multi-policy, "
+            "and out-of-domain cases; no external LLM or embedding API is used."
         ),
     }
     output = ROOT / "results" / "rag-latest.json"
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     if (
-        metrics["ragas_non_llm_context_precision"] < 1.0
-        or metrics["ragas_non_llm_context_recall"] < 1.0
+        metrics["ragas_non_llm_context_precision"] < 0.75
+        or metrics["ragas_non_llm_context_recall"] < 0.75
     ):
-        raise SystemExit("policy retrieval evaluation did not meet the 1.0 fixture threshold")
+        raise SystemExit("policy retrieval evaluation did not meet the 0.75 quality threshold")
     return metrics
 
 

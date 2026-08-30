@@ -2,7 +2,7 @@
 
 LedgerPilot is an auditable agentic-finance prototype for accounts-payable invoices and accounts-receivable remittances. One document-processing layer converts and classifies mailbox or API attachments; a parent LangGraph orchestrator then dispatches the typed payload to an AP or AR subgraph. AP performs deterministic two-way/three-way matching and posts a Payment Journal, while AR mirrors the same retrieve-match-resolve/post pattern against open items and applies cash. Both use a separate stateful Mock ERP HTTP API.
 
-The prototype intentionally separates probabilistic AI from financial controls: Docling and optional Ollama interpret documents, while a real LlamaIndex vector index and PostgreSQL/pgvector retrieve policy context. Deterministic code evaluates arithmetic, tolerances, duplicate rules, approval requirements, and posting eligibility.
+The prototype intentionally separates probabilistic AI from financial controls: direct PDF text extraction and EasyOCR handle common documents, Docling provides the rich-layout fallback, and optional Ollama provides schema-constrained extraction and non-authoritative explanations. A real LlamaIndex vector index and PostgreSQL/pgvector retrieve policy context. Deterministic code evaluates arithmetic, tolerances, duplicate rules, approval requirements, and posting eligibility.
 
 ## What is included
 
@@ -36,6 +36,8 @@ docker compose up --build -d postgres mock-erp api
 Invoke-RestMethod http://localhost:8000/api/v1/health
 Invoke-RestMethod http://localhost:8080/erp/v1/health
 ```
+
+The application health response reports the active LangGraph, LlamaIndex, Docling, Ollama-client, Phoenix, repository, and AI-feature capabilities. A failed configured PostgreSQL startup is logged and reported as `degraded` rather than silently appearing healthy.
 
 Compose uses the named `ledgerpilot-unified-postgres-data` volume by default. This isolates the unified workflow schema and audit chain from any pre-refactor local demo volume without deleting the older data. Override `POSTGRES_VOLUME_NAME` when a different retained environment is intentional.
 
@@ -152,7 +154,7 @@ AR exceptions expose `RETRY_WITH_CORRECTION`, `REJECT`, and `MARK_MANUALLY_RESOL
 | `RECEIPT_SHORTFALL` | Invoiced quantity exceeds the goods-received quantity. |
 | `TOTAL_VARIANCE` | The goods subtotal exceeds the expected PO value beyond tolerance. |
 
-AP invoice exceptions appear at `GET /api/v1/exceptions` and support an explicit decision workflow. Failed AR applications appear separately at `GET /api/v1/remittance-exceptions` for operator follow-up; the prototype does not provide an AR approval override.
+AP invoice exceptions appear at `GET /api/v1/exceptions` and support an explicit decision workflow. An approved non-PO AP exception is passed explicitly to the Mock ERP, while unapproved non-PO journal requests remain blocked. Failed AR applications appear separately at `GET /api/v1/remittance-exceptions`; `APPROVE_APPLY` approves only an already valid match awaiting configured review and can never override an invalid allocation.
 
 ## Shared mailbox configuration
 
@@ -199,7 +201,7 @@ For SAP, Oracle, or NetSuite, implement the same interface, map external IDs int
 
 ## Evaluation results
 
-The checked-in document benchmark has seven synthetic documents across JSON, PDF, scan-like PNG, and HTML. One HTML case is explicitly forced through Docling, so the mandatory processor is exercised rather than merely importable. A separate four-query labeled policy set runs RAGAS non-LLM retrieval metrics over the real LlamaIndex path.
+The checked-in document benchmark has seven synthetic documents across JSON, PDF, scan-like PNG, and HTML. One HTML case is explicitly forced through Docling, so the fallback processor is exercised rather than merely importable. A separate nine-query policy set tests paraphrases, a multi-policy question, distractors, and out-of-domain abstention with RAGAS non-LLM retrieval metrics over the real LlamaIndex path.
 
 | Metric | Result |
 |---|---:|
@@ -211,15 +213,15 @@ The checked-in document benchmark has seven synthetic documents across JSON, PDF
 | Straight-through-processing rate | 57.14% |
 | False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
-| RAGAS context precision | 100.00% |
-| RAGAS context recall | 100.00% |
+| RAGAS context precision | 88.89% |
+| RAGAS context recall | 88.89% |
 
 These numbers validate controlled behavior, not production generalization. A production pilot must use representative, permissioned invoices and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
 
 ## Security and control posture
 
 - Containers run as a non-root user with a read-only filesystem and `no-new-privileges`.
-- Uploads are size-limited; mailbox attachments are allow-listed by extension.
+- API uploads are read incrementally from Starlette's spooled upload and stop at the configured size limit; mailbox attachments are allow-listed by extension.
 - Deterministic duplicate detection and hash-chained audit events support duplicate and tamper controls.
 - Posting requires a successful deterministic match and is idempotent.
 - Human decisions require a supplied actor and comment and become audit events. The actor is not authenticated in this prototype; production requires SSO/RBAC and segregation of duties.

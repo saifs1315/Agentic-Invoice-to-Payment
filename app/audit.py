@@ -32,6 +32,7 @@ class AuditLedger:
         self._events: list[AuditEvent] = list(initial_events or [])
         self._lock = RLock()
         self._sink = sink
+        self._startup_chain_valid = self._verify_events()
 
     def append(self, entity_type: str, entity_id: str, action: str, actor: str, payload: dict[str, Any]) -> AuditEvent:
         with self._lock:
@@ -48,7 +49,7 @@ class AuditLedger:
         events = self._events if entity_id is None else [e for e in self._events if e.entity_id == entity_id]
         return [event.to_dict() for event in events[-limit:]]
 
-    def verify(self) -> bool:
+    def _verify_events(self) -> bool:
         previous = "GENESIS"
         for event in self._events:
             if event.previous_hash != previous:
@@ -58,3 +59,12 @@ class AuditLedger:
                 return False
             previous = event.event_hash
         return True
+
+    def verify(self) -> bool:
+        """Perform an explicit O(n) integrity verification for audit/reporting endpoints."""
+        with self._lock:
+            return self._verify_events()
+
+    def integrity_status(self) -> bool:
+        """Return the startup integrity result without re-hashing on every health probe."""
+        return self._startup_chain_valid

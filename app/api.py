@@ -5,17 +5,32 @@ import json
 from decimal import Decimal
 from typing import Any
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from app.bootstrap import ar_workflow, audit, orchestrator, repo, workflow
+from app.bootstrap import ar_workflow, audit, orchestrator, repo, runtime_capabilities, workflow
 from app.config import settings
 from app.document_processing import UnifiedDocumentProcessor
 from app.domain import DocumentKind, SourceEnvelope, Status
 from app.extraction import extract_invoice_from_document, extract_remittance
+from app.erp import ERPConflictError, ERPUnavailableError
 
 app = FastAPI(title="LedgerPilot API", version="0.2.0", description="Auditable agentic invoice-to-payment and remittance automation")
+ERP_API_RESPONSES = {
+    409: {"description": "ERP business-state conflict"},
+    503: {"description": "ERP transport or server failure"},
+}
+
+
+@app.exception_handler(ERPConflictError)
+async def erp_conflict_handler(_: Request, exc: ERPConflictError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+
+@app.exception_handler(ERPUnavailableError)
+async def erp_unavailable_handler(_: Request, exc: ERPUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 class MatchRequest(BaseModel):
@@ -80,11 +95,24 @@ def _source_envelope(
     )
 
 
+async def _read_upload_limited(file: UploadFile) -> bytes:
+    """Read at most the configured limit plus one byte from the spooled upload."""
+    limit = settings.max_upload_mb * 1024 * 1024
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(min(1024 * 1024, limit - total + 1))
+        if not chunk:
+            return b"".join(chunks)
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(413, "attachment exceeds configured maximum")
+        chunks.append(chunk)
+
+
 @app.post("/api/v1/ingest-invoice", status_code=202, tags=["AP"])
 async def ingest_invoice(file: UploadFile = File(...)) -> dict[str, Any]:
-    content = await file.read()
-    if len(content) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, "attachment exceeds configured maximum")
+    content = await _read_upload_limited(file)
     source_hash = hashlib.sha256(content).hexdigest()
     source_ref = f"sha256:{source_hash}"
     repo.save_source_document(
@@ -114,14 +142,21 @@ async def ingest_invoice(file: UploadFile = File(...)) -> dict[str, Any]:
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/v1/match-po", tags=["AP"])
+@app.post("/api/v1/match-po", tags=["AP"], responses=ERP_API_RESPONSES)
 def match_po(request: MatchRequest) -> dict[str, Any]:
     if repo.get_invoice(request.invoice_id) is None:
         raise HTTPException(404, "invoice not found")
-    return workflow.match(request.invoice_id, request.require_goods_receipt)
+    try:
+        return workflow.match(request.invoice_id, request.require_goods_receipt)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
-@app.post("/api/v1/post-payment-journal", tags=["AP"])
+@app.post(
+    "/api/v1/post-payment-journal",
+    tags=["AP"],
+    responses=ERP_API_RESPONSES,
+)
 def post_payment_journal(request: PostRequest, idempotency_key: str = Header(..., alias="Idempotency-Key")) -> dict[str, Any]:
     try:
         return workflow.post(request.invoice_id, idempotency_key)
@@ -166,14 +201,17 @@ def workflow_status(invoice_id: str) -> dict[str, Any]:
     return state
 
 
-@app.post("/api/v1/ingest-document", status_code=202, tags=["Ingestion"])
+@app.post(
+    "/api/v1/ingest-document",
+    status_code=202,
+    tags=["Ingestion"],
+    responses=ERP_API_RESPONSES,
+)
 async def ingest_document(
     file: UploadFile = File(...),
     workflow_hint: DocumentKind | None = Query(default=None),
 ) -> dict[str, Any]:
-    content = await file.read()
-    if len(content) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, "attachment exceeds configured maximum")
+    content = await _read_upload_limited(file)
     source_hash = hashlib.sha256(content).hexdigest()
     source_ref = f"sha256:{source_hash}"
     envelope = _source_envelope(
@@ -196,7 +234,12 @@ async def ingest_document(
         raise HTTPException(422, str(exc)) from exc
 
 
-@app.post("/api/v1/ingest-remittance", status_code=202, tags=["AR"])
+@app.post(
+    "/api/v1/ingest-remittance",
+    status_code=202,
+    tags=["AR"],
+    responses=ERP_API_RESPONSES,
+)
 def ingest_remittance(request: RemittanceRequest) -> dict[str, Any]:
     remittance = extract_remittance(request.model_dump(), request.source_ref)
     return ar_workflow.ingest(remittance, run=True)
@@ -207,7 +250,11 @@ def list_remittance_exceptions() -> list[dict[str, Any]]:
     return repo.list_remittances(Status.EXCEPTION)
 
 
-@app.post("/api/v1/remittance-exceptions/decision", tags=["AR", "Human oversight"])
+@app.post(
+    "/api/v1/remittance-exceptions/decision",
+    tags=["AR", "Human oversight"],
+    responses=ERP_API_RESPONSES,
+)
 def remittance_exception_decision(request: ARDecisionRequest) -> dict[str, Any]:
     if repo.get_remittance(request.remittance_id) is None:
         raise HTTPException(404, "remittance not found")
@@ -254,7 +301,17 @@ def audit_log(entity_id: str | None = None, limit: int = Query(100, ge=1, le=100
 
 @app.get("/api/v1/health", tags=["Operations"])
 def health() -> dict[str, Any]:
-    return {"status": "ok", "version": "0.2.0", "environment": settings.app_env, "database": repo.backend, "erp": settings.erp_mode, "erp_base_url": settings.erp_base_url if settings.erp_mode == "http" else None, "audit_chain_valid": audit.verify()}
+    degraded = bool(runtime_capabilities["repository_degraded"])
+    return {
+        "status": "degraded" if degraded else "ok",
+        "version": "0.2.0",
+        "environment": settings.app_env,
+        "database": repo.backend,
+        "erp": settings.erp_mode,
+        "erp_base_url": settings.erp_base_url if settings.erp_mode == "http" else None,
+        "audit_chain_valid": audit.integrity_status(),
+        "capabilities": runtime_capabilities,
+    }
 
 
 @app.post("/api/v1/mailbox/poll", tags=["Ingestion"])

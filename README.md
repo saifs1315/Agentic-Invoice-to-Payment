@@ -59,13 +59,7 @@ OCR models are downloaded into the container's temporary cache on first image pr
 
 ## Local development
 
-The evaluation dependency set is tested on Python 3.12. Use the Docker workflow when a newer host interpreter is installed.
-
-Normal GitHub CI runs lint, tests, and Compose validation with the test-only deterministic runtime. Live model benchmarks are deliberately separated into the manually triggered **Live AI evaluation** workflow, which installs Ollama, pulls both pinned models, runs AP/AR/RAG evaluation, and uploads the resulting JSON evidence. This prevents ordinary CI from claiming live-model results when no model server is present.
-
-For a quick live-agent smoke test on a fresh Compose database, submit `evaluation/fixtures/live-agent-ap-clean.json` or `evaluation/fixtures/live-agent-ar-clean.json` through `POST /api/v1/ingest-document`. These dedicated fixtures exercise supervisor dispatch, agent-formulated policy retrieval, bounded domain routing, ERP action, audit, and Phoenix tracing; they are separate from the scored datasets.
-
-The unified processor uses Docling by default for HTML/rich-layout input and supports an explicit `docling` route. Text-native PDFs use PDFium first and scans use EasyOCR first to stay within the documented local Docker memory budget; Docling remains their recorded fallback. This hybrid ordering was load-tested: running heavyweight Docling before OCR for every scan exceeded the 3.5 GB local budget, while the selected ordering preserves deterministic provenance and exercises Docling in the standard benchmark.
+The development and evaluation dependency sets are tested on Python 3.12.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -74,15 +68,57 @@ python -m pip install -e ".[dev,eval]"
 uvicorn app.main:app --reload
 ```
 
-Run verification:
+Run deterministic verification:
 
 ```powershell
 python -m pytest
+docker compose config --quiet
+```
+
+## Running live evaluations
+
+The scored AP, AR, and RAG benchmarks are CLI batch harnesses; Swagger runs individual workflow smoke tests but does not aggregate metrics. Run these commands from the repository root with the Python 3.12 environment above active.
+
+First start the Compose stack so Ollama is reachable on the host and both pinned models are present:
+
+```powershell
+docker compose up --build -d
+```
+
+The checked-in `.env` uses Docker-internal service names. Set these host-side overrides in the PowerShell session before running the evaluators:
+
+```powershell
+$env:APP_ENV = "evaluation"
+$env:DATABASE_URL = "memory://"
+$env:ERP_MODE = "mock"
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+$env:PHOENIX_COLLECTOR_ENDPOINT = ""
+$env:OLLAMA_TIMEOUT_SECONDS = "900"
+```
+
+Run the complete live-model suite:
+
+```powershell
 python evaluation\run_evaluation.py
 python evaluation\run_ar_evaluation.py
 python evaluation\run_rag_evaluation.py
-docker compose config --quiet
 ```
+
+Run one AP dataset case instead of the full AP benchmark:
+
+```powershell
+$env:EVALUATION_FILES = "po-1001-price-variance.pdf"
+python evaluation\run_evaluation.py
+Remove-Item Env:EVALUATION_FILES
+```
+
+`EVALUATION_FILES` also filters the AR evaluator. `EVALUATION_FORMATS`, such as `pdf,png`, filters the AP evaluator by format. Results are printed to the console and overwrite the machine-readable evidence in `evaluation/results/latest.json`, `evaluation/results/ar-latest.json`, and `evaluation/results/rag-latest.json`.
+
+For a quick live-agent Swagger smoke test on a fresh Compose database, submit `evaluation/fixtures/live-agent-ap-clean.json` or `evaluation/fixtures/live-agent-ar-clean.json` through `POST /api/v1/ingest-document`. These fixtures exercise supervisor dispatch, agent-formulated policy retrieval, bounded domain routing, ERP action, audit, and Phoenix tracing, but they are separate from the scored datasets.
+
+Normal GitHub CI runs lint, tests, and Compose validation with the test-only deterministic runtime. The manually triggered **Live AI evaluation** workflow installs Ollama, pulls both pinned models, runs the same AP/AR/RAG commands, and uploads the JSON evidence. This prevents ordinary CI from claiming live-model results when no model server is present.
+
+The unified processor uses Docling by default for HTML/rich-layout input and supports an explicit `docling` route. Text-native PDFs use PDFium first and scans use EasyOCR first to stay within the documented local Docker memory budget; Docling remains their recorded fallback. This hybrid ordering was load-tested: running heavyweight Docling before OCR for every scan exceeded the 3.5 GB local budget, while the selected ordering preserves deterministic provenance and exercises Docling in the standard benchmark.
 
 ## API walkthrough
 

@@ -2,7 +2,7 @@
 
 LedgerPilot is an auditable agentic-finance prototype for accounts-payable invoices and accounts-receivable remittances. A deterministic document-processing tool converts mailbox or API attachments into canonical text, candidate fields, provenance, and confidence. A mandatory local supervisor agent then classifies the evidence and dispatches an AP or AR agent. AP performs two-way/three-way matching and posts a Payment Journal, while AR mirrors the same observe-retrieve-match-resolve/post pattern against open items and applies cash. Both use a separate stateful Mock ERP HTTP API.
 
-AI is a runtime requirement, not an optional enhancement. Ollama runs `qwen3.5:2b-q4_K_M` for schema-constrained extraction, supervisor routing, and bounded AP/AR action selection; `embeddinggemma` powers LlamaIndex and PostgreSQL/pgvector policy retrieval. Probabilistic decisions are never allowed to weaken financial controls: Pydantic schemas, per-stage action allow-lists, fixed LangGraph transitions, arithmetic and tolerance checks, approval state, idempotency, and final posting guards remain deterministic and authoritative. If either model is unavailable, finance execution fails closed with `503`.
+AI is a runtime requirement, not an optional enhancement. Ollama runs `qwen3.5:2b-q4_K_M` for schema-constrained extraction, supervisor routing, policy-query formulation, and bounded AP/AR action selection; `embeddinggemma` powers LlamaIndex and PostgreSQL/pgvector policy retrieval. After deterministic matching, the AP agent chooses `POST_PAYMENT_JOURNAL` or `ESCALATE`, and the AR agent chooses `APPLY_CASH` or `ESCALATE`. Probabilistic decisions are never allowed to weaken financial controls: Pydantic schemas, per-stage action allow-lists, arithmetic and tolerance checks, approval state, idempotency, and deterministic posting guards remain authoritative and audit any veto. If either model is unavailable, finance execution fails closed with `503`.
 
 ## What is included
 
@@ -37,7 +37,7 @@ Invoke-RestMethod http://localhost:8000/api/v1/health
 Invoke-RestMethod http://localhost:8080/erp/v1/health
 ```
 
-The model initializer blocks API startup until both models are pulled. The health response reports the exact runtime/model readiness plus LangGraph, LlamaIndex, Docling, Phoenix, repository, and audit status. Missing AI models return HTTP `503`; a failed configured PostgreSQL startup is reported as `degraded`.
+The model initializer blocks API startup until both models are pulled. The health response reports the exact runtime/model readiness plus LangGraph, LlamaIndex, Docling, Phoenix, repository, and audit status. Missing AI models return HTTP `503`; a configured PostgreSQL or policy-vector initialization failure stops startup rather than silently switching to non-durable storage.
 
 Compose uses the named `ledgerpilot-unified-postgres-data` volume by default. This isolates the unified workflow schema and audit chain from any pre-refactor local demo volume without deleting the older data. Override `POSTGRES_VOLUME_NAME` when a different retained environment is intentional.
 
@@ -60,6 +60,12 @@ OCR models are downloaded into the container's temporary cache on first image pr
 ## Local development
 
 The evaluation dependency set is tested on Python 3.12. Use the Docker workflow when a newer host interpreter is installed.
+
+Normal GitHub CI runs lint, tests, and Compose validation with the test-only deterministic runtime. Live model benchmarks are deliberately separated into the manually triggered **Live AI evaluation** workflow, which installs Ollama, pulls both pinned models, runs AP/AR/RAG evaluation, and uploads the resulting JSON evidence. This prevents ordinary CI from claiming live-model results when no model server is present.
+
+For a quick live-agent smoke test on a fresh Compose database, submit `evaluation/fixtures/live-agent-ap-clean.json` or `evaluation/fixtures/live-agent-ar-clean.json` through `POST /api/v1/ingest-document`. These dedicated fixtures exercise supervisor dispatch, agent-formulated policy retrieval, bounded domain routing, ERP action, audit, and Phoenix tracing; they are separate from the scored datasets.
+
+The unified processor uses Docling by default for HTML/rich-layout input and supports an explicit `docling` route. Text-native PDFs use PDFium first and scans use EasyOCR first to stay within the documented local Docker memory budget; Docling remains their recorded fallback. This hybrid ordering was load-tested: running heavyweight Docling before OCR for every scan exceeded the 3.5 GB local budget, while the selected ordering preserves deterministic provenance and exercises Docling in the standard benchmark.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -181,7 +187,7 @@ The Compose service explicitly passes these values into the API container. Call 
 | `OLLAMA_EMBEDDING_MODEL` | `embeddinggemma` | Local 768-dimensional semantic retrieval model |
 | `OLLAMA_CONTEXT_LENGTH` | `8192` | Bounded context window chosen for local hardware |
 | `OLLAMA_TIMEOUT_SECONDS` | `300` | Allows the first CPU/GPU model load on constrained local hardware |
-| `AGENT_MAX_STEPS` | `8` | Upper bound documented for agent workflows; current fixed graphs use at most four decisions |
+| `AGENT_MAX_STEPS` | `8` | LangGraph recursion limit enforced for parent, AP, and AR workflows |
 | `RAG_SIMILARITY_THRESHOLD` | `0.05` | Minimum semantic similarity for retrieved policy evidence |
 | `DATABASE_URL` | `memory://` locally | PostgreSQL connection string |
 | `MAX_UPLOAD_MB` | `15` | Attachment size limit |
@@ -210,7 +216,7 @@ The checked-in live-agent benchmark has seven synthetic AP documents and nine AR
 | Straight-through-processing rate | 57.14% |
 | False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
-| AR field-level extraction accuracy | 94.44% |
+| AR field-level extraction accuracy | 97.22% |
 | AR match-decision accuracy | 100.00% |
 | False cash-application rate | 0.00% |
 | RAGAS context precision | 88.89% |

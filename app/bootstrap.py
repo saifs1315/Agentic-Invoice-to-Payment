@@ -1,7 +1,7 @@
 import logging
 from importlib.util import find_spec
 
-from app.agent_runtime import create_agent_runtime
+from app.agent_runtime import AIRuntimeUnavailableError, create_agent_runtime
 from app.audit import AuditLedger
 from app.config import settings
 from app.context import POLICY_QUERIES
@@ -13,22 +13,22 @@ from app.repository import MemoryRepository, PostgresRepository
 from app.workflow import InvoiceWorkflow
 
 logger = logging.getLogger(__name__)
-repository_fallback_error: str | None = None
 observability_enabled = configure_observability()
 agent_runtime = create_agent_runtime(settings)
 
-try:
+if settings.database_url.startswith("postgresql"):
+    try:
+        repo = PostgresRepository(settings.database_url, agent_runtime.embed)
+    except AIRuntimeUnavailableError:
+        logger.exception("Mandatory AI embedding runtime failed while seeding policy vectors")
+        raise
+    except Exception:
+        logger.exception("Configured PostgreSQL repository failed to initialize")
+        raise
+else:
     repo = (
-        PostgresRepository(settings.database_url, agent_runtime.embed)
-        if settings.database_url.startswith("postgresql")
-        else MemoryRepository(agent_runtime.embed)
+        MemoryRepository(agent_runtime.embed)
     )
-except Exception as exc:
-    repository_fallback_error = type(exc).__name__
-    logger.exception(
-        "Configured PostgreSQL repository failed to initialize; using non-durable memory storage"
-    )
-    repo = MemoryRepository(agent_runtime.embed)
 
 # With a single-model Ollama budget, cache the two fixed semantic retrieval queries
 # while the embedding model is already resident during repository initialization.
@@ -62,8 +62,8 @@ runtime_capabilities = {
     "docling_available": find_spec("docling") is not None,
     "ollama_client_available": find_spec("ollama") is not None,
     "phoenix_active": observability_enabled,
-    "repository_degraded": repository_fallback_error is not None,
-    "repository_fallback_error": repository_fallback_error,
+    "repository_degraded": False,
+    "repository_fallback_error": None,
 }
 if not runtime_capabilities["langgraph_active"]:
     logger.warning("LangGraph is unavailable; fixed workflow execution fallback is active")

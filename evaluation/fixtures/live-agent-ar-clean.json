@@ -1,6 +1,6 @@
 {
   "customer_id": "CUST-001",
-  "reference": "REM-QWEN-LIVE-001",
+  "reference": "REM-QWEN-LIVE-002",
   "amount": "1000.00",
   "currency": "USD",
   "open_item_refs": ["AR-9001", "AR-9002"]

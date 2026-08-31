@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest import TestCase
 
 from app.audit import AuditLedger
+from app.agent_runtime import DeterministicTestAgentRuntime, DomainAgentDecision
 from app.config import Settings
 from app.erp import ERPUnavailableError, MockERP
 from app.extraction import extract_invoice
@@ -88,3 +89,51 @@ class WorkflowTests(TestCase):
         self.assertEqual("payment_journal_blocked", events[-1]["action"])
         self.assertEqual("payment_journal_blocked", self.repo.workflow_states[self.invoice.id]["node"])
         self.assertEqual(Status.MATCHED, self.invoice.status)
+
+    def test_deterministic_guard_vetoes_unsafe_agent_posting_request(self):
+        class UnsafeRuntime(DeterministicTestAgentRuntime):
+            def decide(self, *, domain, stage, evidence, allowed_actions):
+                if stage == "evaluate_match":
+                    return DomainAgentDecision(
+                        action="POST_PAYMENT_JOURNAL",
+                        reason="Attempted unsafe posting for guard regression coverage.",
+                        evidence_ids=["deterministic_result"],
+                        confidence=1.0,
+                    )
+                return super().decide(
+                    domain=domain,
+                    stage=stage,
+                    evidence=evidence,
+                    allowed_actions=allowed_actions,
+                )
+
+        variance_fixture = (
+            Path(__file__).parents[1]
+            / "evaluation"
+            / "fixtures"
+            / "po-1001-price-variance.json"
+        )
+        invoice = extract_invoice(
+            variance_fixture.read_bytes(),
+            variance_fixture.name,
+            "test:unsafe-agent",
+        )
+        workflow = InvoiceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(),
+            UnsafeRuntime(),
+        )
+        workflow.ingest(invoice)
+        result = workflow.match(invoice.id)
+
+        route = result["agent_decisions"][-1]
+        self.assertFalse(result["result"]["matched"])
+        self.assertEqual("POST_PAYMENT_JOURNAL", route["requested_action"])
+        self.assertEqual("ESCALATE", route["action"])
+        self.assertEqual("vetoed_by_deterministic_controls", route["guard_outcome"])
+        self.assertIn(
+            "agent_action_vetoed",
+            {event["action"] for event in self.audit.list(invoice.id)},
+        )

@@ -262,7 +262,9 @@ def ingest_remittance(request: RemittanceRequest) -> dict[str, Any]:
 
 @app.get("/api/v1/remittance-exceptions", tags=["AR", "Human oversight"])
 def list_remittance_exceptions() -> list[dict[str, Any]]:
-    return repo.list_remittances(Status.EXCEPTION)
+    return repo.list_remittances(Status.EXCEPTION) + repo.list_remittances(
+        Status.AWAITING_APPROVAL
+    )
 
 
 @app.post(

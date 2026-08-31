@@ -1,0 +1,47 @@
+name: Live AI evaluation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APP_ENV: evaluation
+      AGENT_RUNTIME: ollama
+      DATABASE_URL: memory://
+      ERP_MODE: mock
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen3.5:2b-q4_K_M
+      OLLAMA_EMBEDDING_MODEL: embeddinggemma
+      PHOENIX_COLLECTOR_ENDPOINT: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+      - name: Start Ollama and pull pinned models
+        run: |
+          ollama serve > /tmp/ledgerpilot-ollama.log 2>&1 &
+          for attempt in {1..30}; do
+            if ollama list; then break; fi
+            sleep 2
+          done
+          ollama pull "$OLLAMA_MODEL"
+          ollama pull "$OLLAMA_EMBEDDING_MODEL"
+      - run: pip install --index-url https://download.pytorch.org/whl/cpu torch==2.8.0 torchvision==0.23.0
+      - run: pip install -e ".[eval]"
+      - name: Run live AP, AR, and RAG evaluations
+        run: |
+          python evaluation/run_evaluation.py
+          python evaluation/run_ar_evaluation.py
+          python evaluation/run_rag_evaluation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-ai-evaluation-results
+          path: evaluation/results/*.json

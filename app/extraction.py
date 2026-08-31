@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import os
 import re
@@ -120,8 +121,12 @@ def _docling_text(content: bytes, filename: str) -> str:
 
     suffix = Path(filename).suffix or ".bin"
     with _temporary_path(content, suffix) as temporary_path:
-        result = DocumentConverter().convert(temporary_path)
-        return result.document.export_to_markdown()
+        converter = DocumentConverter()
+        result = converter.convert(temporary_path)
+        text = result.document.export_to_markdown()
+        del result, converter
+        gc.collect()
+        return text
 
 
 def _text_from_payload(
@@ -133,7 +138,10 @@ def _text_from_payload(
     lower = filename.lower()
     if lower.endswith(".json"):
         return content.decode("utf-8"), "json", [{"backend": "json", "outcome": "success"}]
-    if processor == "docling":
+    docling_attempted = False
+    rich_document = lower.endswith((".html", ".htm"))
+    if processor == "docling" or rich_document:
+        docling_attempted = True
         try:
             text = _docling_text(content, filename)
             attempts.append({"backend": "docling", "outcome": "success"})
@@ -180,16 +188,18 @@ def _text_from_payload(
             attempts.append(
                 {"backend": "easyocr", "outcome": "failed", "reason": type(exc).__name__}
             )
-    try:
-        text = _docling_text(content, filename)
-        attempts.append({"backend": "docling", "outcome": "success"})
-        return text, "docling", attempts
-    except Exception as exc:
-        attempts.append(
-            {"backend": "docling", "outcome": "failed", "reason": type(exc).__name__}
-        )
+    if not docling_attempted:
+        try:
+            text = _docling_text(content, filename)
+            attempts.append({"backend": "docling", "outcome": "success"})
+            return text, "docling", attempts
+        except Exception as exc:
+            attempts.append(
+                {"backend": "docling", "outcome": "failed", "reason": type(exc).__name__}
+            )
+    if not attempts or attempts[-1].get("backend") != "fallback":
         attempts.append({"backend": "fallback", "outcome": "success"})
-        return content.decode("utf-8", errors="replace"), "fallback", attempts
+    return content.decode("utf-8", errors="replace"), "fallback", attempts
 
 
 def extract_invoice_from_document(

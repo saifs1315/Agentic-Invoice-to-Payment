@@ -1,12 +1,14 @@
 import json
+from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from app.api import app
-from app.bootstrap import agent_runtime, audit, workflow
+from app.bootstrap import agent_runtime, ar_workflow, audit, workflow
 from app.config import settings
+from app.domain import Remittance, Status
 from app.erp import ERPUnavailableError
 
 
@@ -212,6 +214,24 @@ class APITests(TestCase):
             },
         )
         self.assertEqual(422, rejected.status_code)
+
+    def test_ar_specific_queue_includes_items_awaiting_approval(self):
+        item = Remittance(
+            "CUST-001",
+            "REM-API-AWAITING-APPROVAL",
+            Decimal("1000.00"),
+            "USD",
+            ["AR-9001", "AR-9002"],
+            "api:test-ar-awaiting-approval",
+            confidence=1.0,
+        )
+        item.status = Status.AWAITING_APPROVAL
+        ar_workflow.repo.save_remittance(item, {"matched": True})
+
+        queue = self.client.get("/api/v1/remittance-exceptions")
+
+        self.assertEqual(200, queue.status_code)
+        self.assertIn(item.id, {entry["remittance"]["id"] for entry in queue.json()})
 
     def test_unified_document_endpoint_dispatches_and_reports_workflow_state(self):
         payload = {

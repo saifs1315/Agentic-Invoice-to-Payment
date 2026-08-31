@@ -16,9 +16,9 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 1. The Graph adapter polls a scoped shared mailbox, or a caller uploads an attachment.
 2. A SHA-256 source reference is assigned before extraction.
-3. The orchestrator invokes the unified document processor as a tool. PDF text extraction or EasyOCR handles common inputs; Docling is the rich-layout fallback. The tool returns canonical text, deterministic candidate classification, evidence, confidence, and backend attempts, but it cannot dispatch or post.
+3. The orchestrator invokes the unified document processor as a tool. Docling is the default HTML/rich-layout converter and an explicit processor option. PDFium handles text-native PDFs and EasyOCR handles scans first to remain within the local memory budget; Docling is their recorded fallback. The tool returns canonical text, deterministic candidate classification, evidence, confidence, and backend attempts, but it cannot dispatch or post.
 4. The mandatory supervisor agent observes that evidence and returns schema-constrained `DISPATCH_AP`, `DISPATCH_AR`, or `ESCALATE_CLASSIFICATION`. A conflict with strong deterministic evidence is forced to review; ambiguity is never posted.
-5. The parent LangGraph builds a Pydantic-validated payload. Non-JSON documents use schema-constrained Qwen extraction; structured JSON remains deterministic input parsing, while supervisor and domain agent decisions are still mandatory. The graph then invokes the AP or AR agent subgraph.
+5. The parent LangGraph builds a Pydantic-validated payload. Non-JSON documents use schema-constrained Qwen extraction; structured JSON remains deterministic input parsing, while supervisor and domain agent decisions are still mandatory. Each domain agent formulates its policy query and, after deterministic matching, makes a real bounded post/apply-versus-escalate choice. A deterministic guard vetoes and audits any action that is ineligible because of a mismatch, deployment policy, or approval requirement. The graph then invokes the AP or AR agent subgraph.
 6. Generic `finance_workflow_runs` persist domain, source, current node, decisions, retrieved context, and results. The audit chain separately records each processor tool completion and agent decision.
 
 ## AP subgraph
@@ -47,5 +47,5 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 - ERP journal and cash posting use caller-supplied idempotency keys, making retries safe.
 - With automatic posting enabled, `/match-po` creates the journal with `auto:{invoice_id}`; a later call to the mandatory posting endpoint should use that authoritative key to demonstrate a replay.
 - Graph/ERP transport failures should be retried with bounded exponential backoff in a queue worker; the synchronous prototype returns a controlled error without silently advancing state.
-- If PostgreSQL is unavailable at startup, the local prototype logs the failure, uses the in-memory repository, and reports `degraded` plus the fallback type in `/health`. Production should fail closed instead.
+- A configured PostgreSQL failure and an Ollama embedding failure are logged as separate startup failures. Neither silently changes the configured durable repository into in-memory storage.
 - `/health` uses the audit ledger's startup integrity result rather than re-hashing the unbounded event history every 30 seconds. Full chain recomputation remains available through `/api/v1/audit-log`.

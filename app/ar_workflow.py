@@ -124,13 +124,14 @@ class RemittanceWorkflow:
         return {"remittance": remittance.to_dict(), **state}
 
     def _graph_retrieve_policy(self, state: ARWorkflowState) -> ARWorkflowState:
-        query = "customer remittance open AR items currency amount cash application idempotent"
+        query_seed = "customer remittance open AR items currency amount cash application idempotent"
         decision = self._agent_decide(
             state["remittance_id"],
             "retrieve_policy",
-            {"expected_action": "RETRIEVE_POLICY", "query": query},
+            {"query_seed": query_seed},
             ["RETRIEVE_POLICY"],
         )
+        query = str(decision["retrieval_query"])
         policies_with_ids = self.context.retrieve_with_ids(query)
         update: ARWorkflowState = {
             "policies": [policy for _, policy in policies_with_ids],
@@ -181,24 +182,45 @@ class RemittanceWorkflow:
             "agent:ar-matcher",
             {"result": result, "policies": state.get("policies", [])},
         )
-        expected_action = (
-            "APPLY_CASH"
-            if result["matched"]
+        auto_action_permitted = bool(
+            result["matched"]
             and self.config.auto_post_enabled
             and not self.config.require_human_approval
-            else "ESCALATE"
         )
         route_decision = self._agent_decide(
             remittance.id,
             "evaluate_match",
             {
-                "expected_action": expected_action,
                 "deterministic_result": result,
                 "policies": state.get("policies", []),
                 "policy_ids": state.get("policy_ids", []),
+                "control_eligibility": {
+                    "auto_action_permitted": auto_action_permitted,
+                    "auto_post_enabled": self.config.auto_post_enabled,
+                    "human_approval_required": self.config.require_human_approval,
+                },
             },
-            [expected_action],
+            ["APPLY_CASH", "ESCALATE"],
         )
+        requested_action = route_decision["action"]
+        route_decision["requested_action"] = requested_action
+        route_decision["guard_outcome"] = "accepted"
+        if requested_action == "APPLY_CASH" and not auto_action_permitted:
+            route_decision["action"] = "ESCALATE"
+            route_decision["guard_outcome"] = "vetoed_by_deterministic_controls"
+            self.audit.append(
+                "remittance",
+                remittance.id,
+                "agent_action_vetoed",
+                "control:ar-cash-guard",
+                {
+                    "requested_action": requested_action,
+                    "effective_action": "ESCALATE",
+                    "matched": result["matched"],
+                    "auto_post_enabled": self.config.auto_post_enabled,
+                    "human_approval_required": self.config.require_human_approval,
+                },
+            )
         update: ARWorkflowState = {
             "result": result,
             "agent_decisions": [
@@ -267,7 +289,15 @@ class RemittanceWorkflow:
 
     def _graph_finalize(self, state: ARWorkflowState) -> ARWorkflowState:
         remittance = self._remittance_or_raise(state["remittance_id"])
-        if state["result"]["matched"] and self.config.require_human_approval:
+        agent_escalated = (
+            self.config.auto_post_enabled
+            and state.get("agent_decisions", [{}])[-1].get("requested_action") == "ESCALATE"
+        )
+        approval_required = bool(
+            state["result"]["matched"]
+            and (self.config.require_human_approval or agent_escalated)
+        )
+        if approval_required:
             remittance.status = Status.AWAITING_APPROVAL
             self.repo.save_remittance(remittance, state["result"])
         update: ARWorkflowState = {"next_action": "human-review"}
@@ -277,7 +307,10 @@ class RemittanceWorkflow:
     def run(self, remittance_id: str) -> dict[str, Any]:
         initial: ARWorkflowState = {"remittance_id": remittance_id}
         if self.graph is not None:
-            state = self.graph.invoke(initial)
+            state = self.graph.invoke(
+                initial,
+                config={"recursion_limit": self.config.agent_max_steps},
+            )
         else:
             state = {**initial, **self._graph_retrieve_policy(initial)}
             state.update(self._graph_match(state))

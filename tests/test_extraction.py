@@ -10,6 +10,13 @@ from app.extraction import _temporary_path, _text_from_payload, extract_invoice
 
 
 class ExtractionTests(TestCase):
+    def test_docling_is_primary_for_rich_documents(self):
+        with patch("app.extraction._docling_text", return_value="converted invoice"):
+            text, mode, attempts = _text_from_payload(b"<p>invoice</p>", "invoice.html")
+        self.assertEqual("converted invoice", text)
+        self.assertEqual("docling", mode)
+        self.assertEqual("docling", attempts[0]["backend"])
+
     def test_text_invoice_is_schema_validated_with_lines(self):
         content = b"""Vendor ID: VEND-001
 Invoice Number: INV-TEXT-01

@@ -37,6 +37,7 @@ class FinanceOrchestrator:
         self.ap_workflow = ap_workflow
         self.ar_workflow = ar_workflow
         self.runtime = runtime or ap_workflow.runtime
+        self.config = ap_workflow.config
         self.processor = UnifiedDocumentProcessor()
         self.graph = self._build_graph()
 
@@ -245,7 +246,10 @@ class FinanceOrchestrator:
     def ingest(self, envelope: SourceEnvelope) -> dict[str, Any]:
         initial: OrchestratorState = {"envelope": envelope}
         if self.graph is not None:
-            state = self.graph.invoke(initial)
+            state = self.graph.invoke(
+                initial,
+                config={"recursion_limit": self.config.agent_max_steps},
+            )
         else:
             state = dict(initial)
             state.update(self._register_source(state))

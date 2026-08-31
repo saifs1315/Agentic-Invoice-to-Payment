@@ -3,7 +3,9 @@
 | Assignment requirement | Implementation evidence |
 |---|---|
 | Email ingestion for PDF/image/HTML | `app/email_ingestion.py`, `app/document_processing.py`, `/api/v1/mailbox/poll`; attachments enter the same parent orchestrator as API uploads |
+| Docling document processing | `UnifiedDocumentProcessor` uses Docling by default for HTML/rich layouts and as the explicit/fallback processor for other formats; PDFium/EasyOCR low-memory paths and every fallback are recorded in extraction provenance |
 | Contextual agentic workflow | Mandatory `OllamaAgentRuntime`; schema-constrained supervisor in `app/orchestrator.py`; bounded AP `app/workflow.py` and AR `app/ar_workflow.py` observe-reason-act subgraphs; allow-listed tool actions; durable decision state and audit events |
+| LlamaIndex RAG framework | `ContextRetriever` builds a real `VectorStoreIndex` with the Ollama EmbeddingGemma adapter; live RAG evaluation fails unless that semantic index is active |
 | 2-way / 3-way matching | `app/matching.py`, configurable tolerances, partial quantities, bounded tax/freight/discount reconciliation, magnitude limits, and blocking arithmetic controls |
 | Exception routing | variance codes, exception status, `/api/v1/exceptions`, decision endpoint, `/review` |
 | Payment Journal posting via ERP API | `HttpERPClient`, Mock ERP `POST /erp/v1/payment-journals`, mandatory `/api/v1/post-payment-journal`, defensive revalidation, explicit approved non-PO exception parity, idempotency header, controlled `409`/`503` errors and failure audit |

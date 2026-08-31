@@ -131,7 +131,7 @@ def evaluate() -> dict:
         "extraction_modes": dict(sorted(extraction_modes.items())),
         "formats": format_metrics,
         "field_level_extraction_accuracy": round(field_hits / field_total, 4),
-        "document_exact_match_rate": round(match_hits / count, 4),
+        "match_decision_accuracy": round(match_hits / count, 4),
         "exception_classification_accuracy": round(exception_hits / count, 4),
         "exception_routing_recall": (
             round(exception_routed / exception_cases, 4) if exception_cases else 1.0
@@ -143,7 +143,7 @@ def evaluate() -> dict:
         "failed_documents": failures,
         "notes": (
             "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, "
-            "and a forced-Docling HTML case. The live agent performs extraction and bounded action "
+            "and a default-Docling HTML case. The live agent performs extraction and bounded action "
             "selection while deterministic finance controls remain authoritative. Production "
             "validation still requires permissioned vendor samples."
         ),

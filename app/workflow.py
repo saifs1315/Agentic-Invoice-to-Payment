@@ -98,13 +98,14 @@ class InvoiceWorkflow:
         )
 
     def _graph_retrieve_policy(self, state: WorkflowState) -> WorkflowState:
-        query = "invoice matching duplicate PO goods receipt posting approval"
+        query_seed = "invoice matching duplicate PO goods receipt posting approval"
         decision = self._agent_decide(
             state["invoice_id"],
             "retrieve_policy",
-            {"expected_action": "RETRIEVE_POLICY", "query": query},
+            {"query_seed": query_seed},
             ["RETRIEVE_POLICY"],
         )
+        query = str(decision["retrieval_query"])
         policies_with_ids = self.context.retrieve_with_ids(query)
         update: WorkflowState = {
             "policies": [policy for _, policy in policies_with_ids],
@@ -131,24 +132,45 @@ class InvoiceWorkflow:
             state.get("require_goods_receipt", True),
             state.get("policies", []),
         )
-        expected_action = (
-            "POST_PAYMENT_JOURNAL"
-            if result["matched"]
+        auto_action_permitted = bool(
+            result["matched"]
             and self.config.auto_post_enabled
             and not self.config.require_human_approval
-            else "ESCALATE"
         )
         decision = self._agent_decide(
             state["invoice_id"],
             "evaluate_match",
             {
-                "expected_action": expected_action,
                 "deterministic_result": result,
                 "policies": state.get("policies", []),
                 "policy_ids": state.get("policy_ids", []),
+                "control_eligibility": {
+                    "auto_action_permitted": auto_action_permitted,
+                    "auto_post_enabled": self.config.auto_post_enabled,
+                    "human_approval_required": self.config.require_human_approval,
+                },
             },
-            [expected_action],
+            ["POST_PAYMENT_JOURNAL", "ESCALATE"],
         )
+        requested_action = decision["action"]
+        decision["requested_action"] = requested_action
+        decision["guard_outcome"] = "accepted"
+        if requested_action == "POST_PAYMENT_JOURNAL" and not auto_action_permitted:
+            decision["action"] = "ESCALATE"
+            decision["guard_outcome"] = "vetoed_by_deterministic_controls"
+            self.audit.append(
+                "invoice",
+                state["invoice_id"],
+                "agent_action_vetoed",
+                "control:ap-posting-guard",
+                {
+                    "requested_action": requested_action,
+                    "effective_action": "ESCALATE",
+                    "matched": result["matched"],
+                    "auto_post_enabled": self.config.auto_post_enabled,
+                    "human_approval_required": self.config.require_human_approval,
+                },
+            )
         update: WorkflowState = {
             "result": result,
             "explanation": explanation,
@@ -185,16 +207,24 @@ class InvoiceWorkflow:
 
     def _graph_finalize(self, state: WorkflowState) -> WorkflowState:
         matched = bool(state["result"]["matched"])
-        if matched and self.config.require_human_approval:
+        agent_escalated = (
+            self.config.auto_post_enabled
+            and state.get("agent_decisions", [{}])[-1].get("requested_action") == "ESCALATE"
+        )
+        approval_required = bool(
+            matched and (self.config.require_human_approval or agent_escalated)
+        )
+        if approval_required:
             invoice = self._invoice_or_raise(state["invoice_id"])
             invoice.status = Status.AWAITING_APPROVAL
             self.repo.save_invoice(invoice)
-        next_action = (
-            "post-payment-journal"
-            if matched and not self.config.require_human_approval
-            else "human-review"
-        )
-        update: WorkflowState = {"next_action": next_action}
+        update: WorkflowState = {
+            "next_action": (
+                "human-review"
+                if approval_required or not matched
+                else "post-payment-journal"
+            )
+        }
         self._persist("review_or_ready", {**state, **update})
         return update
 
@@ -299,7 +329,10 @@ class InvoiceWorkflow:
             "require_goods_receipt": require_goods_receipt,
         }
         if self.graph is not None:
-            state = self.graph.invoke(initial)
+            state = self.graph.invoke(
+                initial,
+                config={"recursion_limit": self.config.agent_max_steps},
+            )
         else:
             state = {**initial, **self._graph_retrieve_policy(initial)}
             state.update(self._graph_match(state))

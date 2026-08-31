@@ -30,7 +30,7 @@
     }
   },
   "field_level_extraction_accuracy": 0.8857,
-  "document_exact_match_rate": 1.0,
+  "match_decision_accuracy": 1.0,
   "exception_classification_accuracy": 1.0,
   "exception_routing_recall": 1.0,
   "straight_through_processing_rate": 0.5714,
@@ -38,5 +38,5 @@
   "mean_extraction_confidence": 0.9229,
   "audit_chain_integrity_rate": 1.0,
   "failed_documents": [],
-  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. The live agent performs extraction and bounded action selection while deterministic finance controls remain authoritative. Production validation still requires permissioned vendor samples."
+  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a default-Docling HTML case. The live agent performs extraction and bounded action selection while deterministic finance controls remain authoritative. Production validation still requires permissioned vendor samples."
 }

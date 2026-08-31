@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.context import ContextRetriever
-from app.agent_runtime import create_agent_runtime
+from app.agent_runtime import AIRuntimeUnavailableError, create_agent_runtime
 from app.config import Settings
 from app.repository import MemoryRepository, POLICIES
 
@@ -30,6 +30,10 @@ async def evaluate() -> dict[str, object]:
     config = Settings()
     runtime = create_agent_runtime(config)
     retriever = ContextRetriever(MemoryRepository(runtime.embed), runtime, config)
+    if retriever.index is None:
+        raise AIRuntimeUnavailableError(
+            "RAG evaluation requires the live LlamaIndex/Ollama semantic index"
+        )
     precision_metric = NonLLMContextPrecisionWithReference()
     recall_metric = NonLLMContextRecall()
     rows = []

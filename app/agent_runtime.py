@@ -31,7 +31,7 @@ class SupervisorDecision(BaseModel):
             "document_markers",
         ]
     ] = Field(default_factory=list, max_length=4)
-    confidence: float = Field(ge=0, le=1)
+    confidence: float = Field(default=0.5, ge=0, le=1)
 
 
 class DomainAgentDecision(BaseModel):
@@ -44,6 +44,7 @@ class DomainAgentDecision(BaseModel):
         "ESCALATE",
     ]
     reason: str = Field(min_length=3, max_length=1200)
+    retrieval_query: str | None = Field(default=None, min_length=3, max_length=300)
     policy_ids: list[str] = Field(default_factory=list, max_length=8)
     evidence_ids: list[
         Literal[
@@ -58,9 +59,11 @@ class DomainAgentDecision(BaseModel):
             "match",
             "entity_state",
             "idempotency_key",
+            "query_seed",
+            "control_eligibility",
         ]
     ] = Field(default_factory=list, max_length=5)
-    confidence: float = Field(ge=0, le=1)
+    confidence: float = Field(default=0.5, ge=0, le=1)
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -111,6 +114,35 @@ class OllamaAgentRuntime(AgentRuntime):
             return str(response["message"]["content"])
         return str(response.message.content)
 
+    @staticmethod
+    def _validate_json(schema: type[T], content: str) -> T:
+        """Accept schema-valid JSON after removing only invalid trailing commas."""
+        sanitized: list[str] = []
+        in_string = False
+        escaped = False
+        for index, character in enumerate(content):
+            if in_string:
+                sanitized.append(character)
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+                sanitized.append(character)
+                continue
+            if character == ",":
+                next_index = index + 1
+                while next_index < len(content) and content[next_index].isspace():
+                    next_index += 1
+                if next_index < len(content) and content[next_index] in "}]":
+                    continue
+            sanitized.append(character)
+        return schema.model_validate_json("".join(sanitized))
+
     def _structured(self, schema: type[T], system: str, payload: dict[str, Any]) -> T:
         try:
             schema_json = json.dumps(schema.model_json_schema(), separators=(",", ":"))
@@ -141,7 +173,7 @@ class OllamaAgentRuntime(AgentRuntime):
                 )
                 content = self._content(response)
                 try:
-                    return schema.model_validate_json(content)
+                    return self._validate_json(schema, content)
                 except Exception:
                     repair = self.client.chat(
                         model=self.settings.ollama_model,
@@ -159,7 +191,7 @@ class OllamaAgentRuntime(AgentRuntime):
                         think=False,
                     )
                     try:
-                        return schema.model_validate_json(self._content(repair))
+                        return self._validate_json(schema, self._content(repair))
                     except Exception as repair_exc:
                         details = (
                             repair_exc.errors(include_input=False)
@@ -244,14 +276,21 @@ class OllamaAgentRuntime(AgentRuntime):
             f"You are the {domain.upper()} finance agent at stage {stage}. Select exactly one "
             f"action from {allowed_actions}. Retrieved policies and deterministic control results "
             "are authoritative. Never bypass a mismatch or approval control. Never copy source "
-            "text or JSON fragments into the output. Cite only policy IDs supplied in "
-            "evidence.policy_ids and evidence identifiers allowed by the schema.",
+            "text or JSON fragments into the output. At retrieve_policy, formulate a concise "
+            "retrieval_query from the supplied query_seed. At evaluate_match, choose the posting "
+            "or cash action only when deterministic_result.matched and "
+            "control_eligibility.auto_action_permitted are both true; otherwise ESCALATE. You "
+            "may conservatively escalate an eligible case when the policy evidence justifies it. "
+            "Cite only policy IDs supplied in evidence.policy_ids and evidence identifiers "
+            "allowed by the schema.",
             {"stage": stage, "allowed_actions": allowed_actions, "evidence": evidence},
         )
         if decision.action not in allowed_actions:
             raise AgentProtocolError(
                 f"agent action {decision.action} is outside the stage allow-list"
             )
+        if stage == "retrieve_policy" and not decision.retrieval_query:
+            raise AgentProtocolError("agent did not formulate the required policy retrieval query")
         supplied_policy_ids = {str(item) for item in evidence.get("policy_ids", [])}
         decision.policy_ids = [
             policy_id for policy_id in decision.policy_ids if policy_id in supplied_policy_ids
@@ -340,13 +379,30 @@ class DeterministicTestAgentRuntime(AgentRuntime):
         evidence: dict[str, Any],
         allowed_actions: list[str],
     ) -> DomainAgentDecision:
-        preferred = str(evidence.get("expected_action", allowed_actions[0]))
+        if stage == "evaluate_match":
+            eligibility = evidence.get("control_eligibility", {})
+            auto_action = "POST_PAYMENT_JOURNAL" if domain == "ap" else "APPLY_CASH"
+            preferred = (
+                auto_action
+                if evidence.get("deterministic_result", {}).get("matched")
+                and eligibility.get("auto_action_permitted")
+                else "ESCALATE"
+            )
+            evidence_ids = ["deterministic_result", "control_eligibility"]
+        else:
+            preferred = str(evidence.get("expected_action", allowed_actions[0]))
+            evidence_ids = ["expected_action"] if "expected_action" in evidence else []
         action = preferred if preferred in allowed_actions else allowed_actions[0]
         return DomainAgentDecision(
             action=action,
             reason="Deterministic test agent selected the expected guarded action.",
+            retrieval_query=(
+                str(evidence["query_seed"])
+                if stage == "retrieve_policy" and evidence.get("query_seed")
+                else None
+            ),
             policy_ids=[str(item) for item in evidence.get("policy_ids", [])],
-            evidence_ids=["expected_action"],
+            evidence_ids=evidence_ids,
             confidence=1.0,
         )
 

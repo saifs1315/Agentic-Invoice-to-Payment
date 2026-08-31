@@ -2,6 +2,7 @@ from decimal import Decimal
 from unittest import TestCase
 
 from app.ar_workflow import RemittanceWorkflow
+from app.agent_runtime import DeterministicTestAgentRuntime, DomainAgentDecision
 from app.audit import AuditLedger
 from app.config import Settings
 from app.domain import Remittance, Status
@@ -90,3 +91,49 @@ class ARWorkflowTests(TestCase):
                 "reviewer:test",
                 "Do not bypass controls",
             )
+
+    def test_agent_can_conservatively_escalate_an_eligible_match(self):
+        class ConservativeRuntime(DeterministicTestAgentRuntime):
+            def decide(self, *, domain, stage, evidence, allowed_actions):
+                if stage == "evaluate_match":
+                    return DomainAgentDecision(
+                        action="ESCALATE",
+                        reason="Policy evidence warrants a conservative human review.",
+                        evidence_ids=["deterministic_result", "policy_ids"],
+                        confidence=0.8,
+                    )
+                return super().decide(
+                    domain=domain,
+                    stage=stage,
+                    evidence=evidence,
+                    allowed_actions=allowed_actions,
+                )
+
+        workflow = RemittanceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(),
+            ConservativeRuntime(),
+        )
+        item = remittance("REM-CONSERVATIVE")
+        result = workflow.ingest(item, run=True)
+
+        self.assertTrue(result["result"]["matched"])
+        self.assertEqual("ESCALATE", result["agent_decisions"][-1]["action"])
+        self.assertEqual("human-review", result["next_action"])
+        self.assertEqual(Status.AWAITING_APPROVAL, item.status)
+
+    def test_disabled_auto_post_preserves_matched_state_without_implying_approval(self):
+        workflow = RemittanceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(auto_post_enabled=False),
+        )
+        item = remittance("REM-MANUAL-POST")
+        result = workflow.ingest(item, run=True)
+
+        self.assertTrue(result["result"]["matched"])
+        self.assertEqual("human-review", result["next_action"])
+        self.assertEqual(Status.MATCHED, item.status)

@@ -3,6 +3,8 @@ from decimal import Decimal
 from unittest import TestCase
 from unittest.mock import patch
 
+from pydantic import ValidationError
+
 from app.config import Settings
 
 
@@ -49,3 +51,9 @@ class SettingsTests(TestCase):
         self.assertFalse(configured.auto_post_enabled)
         self.assertEqual("http", configured.erp_mode)
         self.assertEqual(7, configured.max_upload_mb)
+
+    def test_agent_step_budget_cannot_be_lower_than_the_parent_graph_depth(self):
+        with self.assertRaises(ValidationError):
+            Settings(agent_max_steps=5)
+
+        self.assertEqual(6, Settings(agent_max_steps=6).agent_max_steps)

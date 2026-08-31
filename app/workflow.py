@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from app.agent_runtime import AgentRuntime, create_agent_runtime
+from app.agent_runtime import AgentProtocolError, AgentRuntime, create_agent_runtime
 from app.audit import AuditLedger
 from app.config import Settings
 from app.context import ContextRetriever
@@ -105,8 +105,28 @@ class InvoiceWorkflow:
             {"query_seed": query_seed},
             ["RETRIEVE_POLICY"],
         )
-        query = str(decision["retrieval_query"])
-        policies_with_ids = self.context.retrieve_with_ids(query)
+        try:
+            policies_with_ids, query, fallback_used = self.context.retrieve_agent_query(
+                decision.get("retrieval_query"),
+                query_seed,
+            )
+        except AgentProtocolError as exc:
+            self.audit.append(
+                "invoice",
+                state["invoice_id"],
+                "policy_retrieval_blocked",
+                "control:policy-evidence",
+                {"agent_query": decision.get("retrieval_query"), "reason": str(exc)},
+            )
+            raise
+        if fallback_used:
+            self.audit.append(
+                "invoice",
+                state["invoice_id"],
+                "policy_retrieval_fallback",
+                "control:policy-evidence",
+                {"agent_query": decision.get("retrieval_query"), "effective_query": query},
+            )
         update: WorkflowState = {
             "policies": [policy for _, policy in policies_with_ids],
             "policy_ids": [policy_id for policy_id, _ in policies_with_ids],
@@ -199,7 +219,6 @@ class InvoiceWorkflow:
         journal = self.post(
             state["invoice_id"],
             f"auto:{state['invoice_id']}",
-            require_agent_decision=False,
         )
         update: WorkflowState = {"next_action": "posted", "journal": journal}
         self._persist("auto_post", {**state, **update})
@@ -378,7 +397,6 @@ class InvoiceWorkflow:
         invoice_id: str,
         idempotency_key: str,
         actor: str = "agent:poster",
-        require_agent_decision: bool = True,
     ) -> dict[str, Any]:
         invoice = self._invoice_or_raise(invoice_id)
         existing = self.repo.get_journal(invoice_id, idempotency_key)
@@ -387,19 +405,12 @@ class InvoiceWorkflow:
         match = self.repo.latest_match(invoice_id)
         if match is None or (not match.matched and invoice.status != Status.APPROVED):
             raise ValueError("invoice does not have a successful match or explicit exception approval")
+        if invoice.status not in {Status.MATCHED, Status.APPROVED}:
+            raise ValueError(
+                f"invoice status {invoice.status.value} is not authorized for posting"
+            )
         if self.config.require_human_approval and invoice.status != Status.APPROVED:
             raise ValueError("human approval is required before posting")
-        if require_agent_decision:
-            self._agent_decide(
-                invoice_id,
-                "manual_post_request",
-                {
-                    "expected_action": "POST_PAYMENT_JOURNAL",
-                    "invoice_status": invoice.status.value,
-                    "match": match.to_dict(),
-                },
-                ["POST_PAYMENT_JOURNAL"],
-            )
         try:
             journal = self.erp.post_payment_journal(invoice, idempotency_key)
         except ERPError as exc:

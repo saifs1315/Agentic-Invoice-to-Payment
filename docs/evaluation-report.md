@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-LedgerPilot passed all 60 automated unit, API, runtime, control, workflow, context, and audit tests. The mandatory live-agent AP benchmark covers seven synthetic documents; the mirrored AR benchmark covers nine documents across JSON, text, PDF, PNG, and HTML. AP scored 88.57% labeled field extraction and AR scored 97.22%; both scored 100% evaluation coverage, finance decisions, exception classification, and audit-chain integrity. No ineligible invoice was auto-posted and no invalid remittance caused cash application. A nine-query EmbeddingGemma policy dataset scored 88.89% RAGAS non-LLM context precision and recall.
+LedgerPilot passed all 66 automated unit, API, runtime, control, workflow, context, and audit tests. The mandatory live-agent AP benchmark covers seven synthetic documents; the mirrored AR benchmark covers nine documents across JSON, text, PDF, PNG, and HTML. AP scored 88.57% labeled field extraction and AR scored 97.22%; both scored 100% evaluation coverage, finance decisions, exception classification, and audit-chain integrity. No ineligible invoice was auto-posted and no invalid remittance caused cash application. The live agent conservatively escalated 0 of 4 eligible AP cases and 0 of 5 eligible AR cases in the recorded run. A nine-query EmbeddingGemma policy dataset scored 88.89% RAGAS non-LLM context precision and recall.
 
 These results demonstrate implementation correctness against known fixtures. They do not estimate production accuracy across diverse vendor layouts, scans, languages, handwriting, or adversarial documents.
 
@@ -13,7 +13,7 @@ These results demonstrate implementation correctness against known fixtures. The
 | JSON | 3 | Clean PO match, 10% price variance, and missing PO |
 | Text-native PDF | 2 | Clean PO match and 10% price variance |
 | Scan-like PNG | 1 | OCR five core fields and one line, then clean PO match |
-| HTML through Docling | 1 | Force Docling conversion, extract fields, then clean PO match |
+| HTML through Docling | 1 | Use default Docling conversion, extract fields, then clean PO match |
 
 The AR set is stored in `evaluation/ar_dataset.json` and contains five structured control cases (clean, currency mismatch, partial, overpayment, missing item) plus clean text, PDF, scan, and HTML remittance advices. Duplicate remittance, correction/re-match, human approval, and replay behavior are covered in deterministic tests because those scenarios require state shared across requests.
 
@@ -37,6 +37,7 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 - **Exception-classification accuracy:** documents containing the labeled exception code, or no variance for a clean case.
 - **Exception-routing recall:** labeled exception cases sent to human review.
 - **STP rate:** documents posted without human intervention divided by all documents received.
+- **Conservative-escalation rate:** otherwise eligible deterministic matches that the bounded action agent sends to human review divided by all eligible auto-action cases. This live-model metric may vary between runs.
 - **False auto-post rate:** ineligible documents automatically posted divided by all documents.
 - **Audit-chain integrity:** workflows whose recomputed SHA-256 links remain valid.
 - **Evaluation coverage:** documents completing extraction and workflow evaluation divided by all selected documents. Any failure makes the command exit non-zero.
@@ -54,6 +55,8 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 | Exception-routing recall | 100.00% |
 | Evaluation coverage | 100.00% |
 | Straight-through-processing rate | 57.14% |
+| Eligible auto-action cases | 4 |
+| Conservative-escalation rate | 0.00% (0 / 4) |
 | False auto-post rate | 0.00% |
 | Mean extraction confidence | 92.29% |
 | Audit-chain integrity | 100.00% |
@@ -69,6 +72,8 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 | Field-level extraction accuracy | 97.22% |
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
+| Eligible auto-action cases | 5 |
+| Conservative-escalation rate | 0.00% (0 / 5) |
 | False cash-application rate | 0.00% |
 | Audit-chain integrity | 100.00% |
 
@@ -78,7 +83,7 @@ AP field accuracy was JSON 100% (3), PDF 80% (2), PNG 80% (1), and HTML/Docling 
 
 ## Automated verification
 
-Sixty tests cover the original AP controls plus mandatory-runtime configuration, schema-constrained agent contracts, agent-generated policy queries, bounded AP/AR action authority with deterministic vetoes, shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, terminal AP transition guards, audited ERP failures, non-PO override parity, bounded uploads, API dispatch, durable generic workflow state, and the unified exception surface.
+Sixty-six tests cover the original AP controls plus mandatory-runtime configuration, schema-constrained agent contracts (including honest omission of unknown confidence), validated policy-query fallback and fail-closed behavior, bounded AP/AR action authority with deterministic vetoes, shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, recursion-budget failure handling, conservative action-agent escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, terminal AP transition guards (including rejection and approval-state posting controls), audited ERP failures, non-PO override parity, bounded uploads, API dispatch, durable generic workflow state, and the unified exception surface.
 
 ## Production pilot plan
 

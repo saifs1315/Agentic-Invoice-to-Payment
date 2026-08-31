@@ -124,6 +124,7 @@ def _docling_text(content: bytes, filename: str) -> str:
         converter = DocumentConverter()
         result = converter.convert(temporary_path)
         text = result.document.export_to_markdown()
+        # Release Docling's model graph before CPU-only Qwen extraction under the 4 GB budget.
         del result, converter
         gc.collect()
         return text

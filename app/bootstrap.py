@@ -26,9 +26,7 @@ if settings.database_url.startswith("postgresql"):
         logger.exception("Configured PostgreSQL repository failed to initialize")
         raise
 else:
-    repo = (
-        MemoryRepository(agent_runtime.embed)
-    )
+    repo = MemoryRepository(agent_runtime.embed)
 
 # With a single-model Ollama budget, cache the two fixed semantic retrieval queries
 # while the embedding model is already resident during repository initialization.
@@ -62,8 +60,6 @@ runtime_capabilities = {
     "docling_available": find_spec("docling") is not None,
     "ollama_client_available": find_spec("ollama") is not None,
     "phoenix_active": observability_enabled,
-    "repository_degraded": False,
-    "repository_fallback_error": None,
 }
 if not runtime_capabilities["langgraph_active"]:
     logger.warning("LangGraph is unavailable; fixed workflow execution fallback is active")

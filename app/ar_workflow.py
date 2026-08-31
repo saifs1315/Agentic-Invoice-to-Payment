@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, TypedDict
 
-from app.agent_runtime import AgentRuntime, create_agent_runtime
+from app.agent_runtime import AgentProtocolError, AgentRuntime, create_agent_runtime
 from app.ar_matching import match_remittance
 from app.audit import AuditLedger
 from app.config import Settings
@@ -131,8 +131,28 @@ class RemittanceWorkflow:
             {"query_seed": query_seed},
             ["RETRIEVE_POLICY"],
         )
-        query = str(decision["retrieval_query"])
-        policies_with_ids = self.context.retrieve_with_ids(query)
+        try:
+            policies_with_ids, query, fallback_used = self.context.retrieve_agent_query(
+                decision.get("retrieval_query"),
+                query_seed,
+            )
+        except AgentProtocolError as exc:
+            self.audit.append(
+                "remittance",
+                state["remittance_id"],
+                "policy_retrieval_blocked",
+                "control:policy-evidence",
+                {"agent_query": decision.get("retrieval_query"), "reason": str(exc)},
+            )
+            raise
+        if fallback_used:
+            self.audit.append(
+                "remittance",
+                state["remittance_id"],
+                "policy_retrieval_fallback",
+                "control:policy-evidence",
+                {"agent_query": decision.get("retrieval_query"), "effective_query": query},
+            )
         update: ARWorkflowState = {
             "policies": [policy for _, policy in policies_with_ids],
             "policy_ids": [policy_id for policy_id, _ in policies_with_ids],

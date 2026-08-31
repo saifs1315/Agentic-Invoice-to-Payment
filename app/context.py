@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent_runtime import AIRuntimeUnavailableError, AgentRuntime, create_agent_runtime
+from app.agent_runtime import (
+    AIRuntimeUnavailableError,
+    AgentProtocolError,
+    AgentRuntime,
+    create_agent_runtime,
+)
 from app.config import Settings
 from app.repository import MemoryRepository, POLICIES
 
@@ -109,3 +114,22 @@ class ContextRetriever:
 
     def retrieve(self, query: str, top_k: int = 2) -> list[str]:
         return [policy for _, policy in self.retrieve_with_ids(query, top_k)]
+
+    def retrieve_agent_query(
+        self,
+        agent_query: object,
+        query_seed: str,
+        top_k: int = 2,
+    ) -> tuple[list[tuple[str, str]], str, bool]:
+        """Validate the agent query and retry the governed seed before failing closed."""
+        if not isinstance(agent_query, str) or not agent_query.strip():
+            raise AgentProtocolError("agent did not provide a usable policy retrieval query")
+        query = agent_query.strip()
+        policies = self.retrieve_with_ids(query, top_k)
+        fallback_used = not policies and query != query_seed
+        if fallback_used:
+            query = query_seed
+            policies = self.retrieve_with_ids(query, top_k)
+        if not policies:
+            raise AgentProtocolError("policy retrieval returned no governed evidence")
+        return policies, query, fallback_used

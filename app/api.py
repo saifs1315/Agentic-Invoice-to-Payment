@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
+from langgraph.errors import GraphRecursionError
 from pydantic import BaseModel, Field
 
 from app.agent_runtime import AIRuntimeUnavailableError, AgentProtocolError
@@ -53,6 +54,14 @@ async def ai_unavailable_handler(_: Request, exc: AIRuntimeUnavailableError) -> 
 @app.exception_handler(AgentProtocolError)
 async def agent_protocol_handler(_: Request, exc: AgentProtocolError) -> JSONResponse:
     return JSONResponse(status_code=502, content={"detail": str(exc), "ai_required": True})
+
+
+@app.exception_handler(GraphRecursionError)
+async def graph_recursion_handler(_: Request, exc: GraphRecursionError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={"detail": str(exc), "workflow_step_budget_exhausted": True},
+    )
 
 
 class MatchRequest(BaseModel):
@@ -326,11 +335,10 @@ def health(response: Response) -> dict[str, Any]:
         "ap_agent_ready": ai["ready"],
         "ar_agent_ready": ai["ready"],
     }
-    degraded = bool(runtime_capabilities["repository_degraded"])
     if not ai["ready"]:
         response.status_code = 503
     return {
-        "status": "unavailable" if not ai["ready"] else ("degraded" if degraded else "ok"),
+        "status": "unavailable" if not ai["ready"] else "ok",
         "version": "0.3.0",
         "environment": settings.app_env,
         "database": repo.backend,

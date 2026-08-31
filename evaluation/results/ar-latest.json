@@ -5,6 +5,9 @@
   "field_level_extraction_accuracy": 0.9722,
   "match_decision_accuracy": 1.0,
   "exception_classification_accuracy": 1.0,
+  "eligible_auto_action_cases": 5,
+  "conservative_escalations": 0,
+  "conservative_escalation_rate": 0.0,
   "false_cash_application_rate": 0.0,
   "audit_chain_integrity_rate": 1.0,
   "formats": {
@@ -35,5 +38,5 @@
     }
   },
   "failed_documents": [],
-  "notes": "Synthetic live-agent AR benchmark with deterministic matching and posting guards; production validation requires permissioned bank advice."
+  "notes": "Synthetic live-agent AR benchmark with deterministic matching and posting guards. Conservative escalation is a live-model outcome and may vary between runs; production validation requires permissioned bank advice."
 }

@@ -55,6 +55,7 @@ def evaluate() -> dict:
         ]
     field_hits = field_total = match_hits = exception_hits = posted = 0
     audit_valid = false_auto_posts = exception_cases = exception_routed = 0
+    eligible_auto_actions = conservative_escalations = 0
     confidences: list[float] = []
     by_format: dict[str, dict[str, int]] = defaultdict(
         lambda: {"documents": 0, "field_hits": 0, "field_total": 0, "decision_hits": 0}
@@ -107,6 +108,16 @@ def evaluate() -> dict:
             ) or item["expected_exception"] in codes
             exception_hits += exception_hit
             exception_routed += item["expected_exception"] is not None and outcome["next_action"] == "human-review"
+            eligible = bool(
+                result["matched"]
+                and config.auto_post_enabled
+                and not config.require_human_approval
+            )
+            eligible_auto_actions += eligible
+            conservative_escalations += bool(
+                eligible
+                and outcome["agent_decisions"][-1].get("requested_action") == "ESCALATE"
+            )
             posted += outcome["next_action"] == "posted"
             false_auto_posts += (not item["expected_match"]) and outcome["next_action"] == "posted"
             audit_valid += audit.verify()
@@ -137,6 +148,13 @@ def evaluate() -> dict:
             round(exception_routed / exception_cases, 4) if exception_cases else 1.0
         ),
         "straight_through_processing_rate": round(posted / count, 4),
+        "eligible_auto_action_cases": eligible_auto_actions,
+        "conservative_escalations": conservative_escalations,
+        "conservative_escalation_rate": (
+            round(conservative_escalations / eligible_auto_actions, 4)
+            if eligible_auto_actions
+            else 0.0
+        ),
         "false_auto_post_rate": round(false_auto_posts / count, 4),
         "mean_extraction_confidence": round(sum(confidences) / count, 4),
         "audit_chain_integrity_rate": round(audit_valid / count, 4),
@@ -144,8 +162,9 @@ def evaluate() -> dict:
         "notes": (
             "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, "
             "and a default-Docling HTML case. The live agent performs extraction and bounded action "
-            "selection while deterministic finance controls remain authoritative. Production "
-            "validation still requires permissioned vendor samples."
+            "selection while deterministic finance controls remain authoritative. STP and "
+            "conservative escalation are live-model outcomes and may vary between runs. "
+            "Production validation still requires permissioned vendor samples."
         ),
     }
     output = ROOT / "results" / "latest.json"

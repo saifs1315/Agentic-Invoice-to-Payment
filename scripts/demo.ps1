@@ -4,6 +4,17 @@ $fixture = Join-Path $PSScriptRoot "..\evaluation\fixtures\po-1001-invoice.json"
 $ingested = Invoke-RestMethod -Method Post -Uri "$api/api/v1/ingest-invoice" -Form @{ file = Get-Item $fixture }
 $invoiceId = $ingested.invoice.id
 $match = Invoke-RestMethod -Method Post -Uri "$api/api/v1/match-po" -ContentType "application/json" -Body (@{ invoice_id = $invoiceId; require_goods_receipt = $true } | ConvertTo-Json)
+if (-not $match.result.matched) {
+    throw "The demo invoice did not pass deterministic matching. Resolve the exception before posting."
+}
+if ($match.next_action -eq "human-review") {
+    Invoke-RestMethod -Method Post -Uri "$api/api/v1/exceptions/decision" -ContentType "application/json" -Body (@{
+        invoice_id = $invoiceId
+        approved = $true
+        actor = "reviewer:demo"
+        comment = "Approved after reviewing the agent escalation and deterministic evidence"
+    } | ConvertTo-Json) | Out-Null
+}
 $idempotencyKey = if ($match.next_action -eq "posted") { "auto:$invoiceId" } else { "demo:$invoiceId" }
 $journal = Invoke-RestMethod -Method Post -Uri "$api/api/v1/post-payment-journal" -Headers @{ "Idempotency-Key" = $idempotencyKey } -ContentType "application/json" -Body (@{ invoice_id = $invoiceId } | ConvertTo-Json)
 $retry = Invoke-RestMethod -Method Post -Uri "$api/api/v1/post-payment-journal" -Headers @{ "Idempotency-Key" = $idempotencyKey } -ContentType "application/json" -Body (@{ invoice_id = $invoiceId } | ConvertTo-Json)

@@ -49,6 +49,7 @@ def evaluate() -> dict:
         raise ValueError("evaluation filters did not select any AR dataset items")
     field_hits = field_total = classification_hits = match_hits = exception_hits = 0
     false_cash_applications = audit_valid = 0
+    eligible_auto_actions = conservative_escalations = 0
     by_format: dict[str, dict[str, int]] = defaultdict(
         lambda: {"documents": 0, "field_hits": 0, "field_total": 0, "decision_hits": 0}
     )
@@ -89,6 +90,16 @@ def evaluate() -> dict:
             exception_hits += (
                 item["expected_exception"] is None and not codes
             ) or item["expected_exception"] in codes
+            eligible = bool(
+                result["matched"]
+                and config.auto_post_enabled
+                and not config.require_human_approval
+            )
+            eligible_auto_actions += eligible
+            conservative_escalations += bool(
+                eligible
+                and outcome["agent_decisions"][-1].get("requested_action") == "ESCALATE"
+            )
             false_cash_applications += (not item["expected_match"]) and result["applied"]
             audit_valid += audit.verify()
         except Exception as exc:
@@ -102,6 +113,13 @@ def evaluate() -> dict:
         "field_level_extraction_accuracy": round(field_hits / field_total, 4),
         "match_decision_accuracy": round(match_hits / count, 4),
         "exception_classification_accuracy": round(exception_hits / count, 4),
+        "eligible_auto_action_cases": eligible_auto_actions,
+        "conservative_escalations": conservative_escalations,
+        "conservative_escalation_rate": (
+            round(conservative_escalations / eligible_auto_actions, 4)
+            if eligible_auto_actions
+            else 0.0
+        ),
         "false_cash_application_rate": round(false_cash_applications / count, 4),
         "audit_chain_integrity_rate": round(audit_valid / count, 4),
         "formats": {
@@ -114,7 +132,8 @@ def evaluate() -> dict:
         },
         "failed_documents": failures,
         "notes": (
-            "Synthetic live-agent AR benchmark with deterministic matching and posting guards; "
+            "Synthetic live-agent AR benchmark with deterministic matching and posting guards. "
+            "Conservative escalation is a live-model outcome and may vary between runs; "
             "production validation requires permissioned bank advice."
         ),
     }

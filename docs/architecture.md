@@ -23,10 +23,10 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 ## AP subgraph
 
-1. The AP agent chooses the allow-listed `RETRIEVE_POLICY` tool. `embeddinggemma`, LlamaIndex, and pgvector return labeled policy evidence.
+1. The AP agent chooses the allow-listed `RETRIEVE_POLICY` tool. `embeddinggemma`, LlamaIndex, and pgvector return labeled policy evidence. The agent query must be nonblank; an empty result is retried once with the governed seed query and then fails closed with an audit event.
 2. The agent chooses `RUN_AP_MATCH`; the HTTP ERP tool reads the PO and Goods Receipt and deterministic code validates arithmetic, duplicates, vendor/currency, tolerances, quantities, and receipts.
 3. The agent observes the control result and must choose the single permitted guarded outcome: `POST_PAYMENT_JOURNAL` for an eligible clean match or `ESCALATE` otherwise.
-4. The posting tool independently revalidates successful match/approval state and idempotency before calling the Mock ERP. Exceptions enter the human queue.
+4. The posting tool independently revalidates successful match, an authorized `MATCHED` or `APPROVED` state, and idempotency before calling the Mock ERP. `AWAITING_APPROVAL`, `REJECTED`, and exception states are blocked even when the earlier arithmetic match passed. Exceptions enter the human queue.
 5. The Mock ERP revalidates PO/vendor/currency at the posting boundary. A missing-PO journal is accepted only when the workflow transmits an explicit previously recorded human exception approval; audit events retain match evidence, policies, human decisions, and the ERP response.
 
 ## AR subgraph
@@ -46,6 +46,6 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 - ERP business conflicts return `409`; transport/server failures return `503`. Failed lookup, journal, and cash operations are audited without advancing to a posted state.
 - ERP journal and cash posting use caller-supplied idempotency keys, making retries safe.
 - With automatic posting enabled, `/match-po` creates the journal with `auto:{invoice_id}`; a later call to the mandatory posting endpoint should use that authoritative key to demonstrate a replay.
-- Graph/ERP transport failures should be retried with bounded exponential backoff in a queue worker; the synchronous prototype returns a controlled error without silently advancing state.
+- LangGraph step budgets have a minimum large enough to complete the parent graph; exhaustion returns a controlled `503`. Graph/ERP transport failures should be retried with bounded exponential backoff in a queue worker; the synchronous prototype returns a controlled error without silently advancing state.
 - A configured PostgreSQL failure and an Ollama embedding failure are logged as separate startup failures. Neither silently changes the configured durable repository into in-memory storage.
 - `/health` uses the audit ledger's startup integrity result rather than re-hashing the unbounded event history every 30 seconds. Full chain recomputation remains available through `/api/v1/audit-log`.

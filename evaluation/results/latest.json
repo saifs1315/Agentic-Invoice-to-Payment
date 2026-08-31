@@ -34,9 +34,12 @@
   "exception_classification_accuracy": 1.0,
   "exception_routing_recall": 1.0,
   "straight_through_processing_rate": 0.5714,
+  "eligible_auto_action_cases": 4,
+  "conservative_escalations": 0,
+  "conservative_escalation_rate": 0.0,
   "false_auto_post_rate": 0.0,
   "mean_extraction_confidence": 0.9229,
   "audit_chain_integrity_rate": 1.0,
   "failed_documents": [],
-  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a default-Docling HTML case. The live agent performs extraction and bounded action selection while deterministic finance controls remain authoritative. Production validation still requires permissioned vendor samples."
+  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a default-Docling HTML case. The live agent performs extraction and bounded action selection while deterministic finance controls remain authoritative. STP and conservative escalation are live-model outcomes and may vary between runs. Production validation still requires permissioned vendor samples."
 }

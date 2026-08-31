@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     ollama_embedding_model: str = "embeddinggemma"
     ollama_timeout_seconds: float = Field(default=300.0, gt=0)
     ollama_context_length: int = Field(default=8192, ge=2048, le=32768)
-    agent_max_steps: int = Field(default=8, ge=3, le=20)
+    agent_max_steps: int = Field(default=8, ge=6, le=20)
     rag_similarity_threshold: float = Field(default=0.05, ge=-1, le=1)
     erp_mode: Literal["mock", "http"] = "mock"
     erp_base_url: str = "http://localhost:8080"

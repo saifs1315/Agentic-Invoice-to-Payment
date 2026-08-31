@@ -102,14 +102,37 @@ $match = Invoke-RestMethod -Method Post `
   -Uri http://localhost:8000/api/v1/match-po `
   -ContentType application/json -Body $body
 
-# 3. Verify an idempotent replay. With AUTO_POST_ENABLED=true, step 2 already posted it.
+if (-not $match.result.matched) {
+  throw "Invoice did not pass the deterministic match and cannot be posted."
+}
+
+# 3. Respect a conservative agent escalation before posting.
+if ($match.next_action -eq "human-review" -and $match.result.matched) {
+  Invoke-RestMethod -Method Post `
+    -Uri http://localhost:8000/api/v1/exceptions/decision `
+    -ContentType application/json `
+    -Body (@{
+      invoice_id = $ingested.invoice.id
+      approved = $true
+      actor = "reviewer:demo"
+      comment = "Reviewed agent escalation and deterministic evidence"
+    } | ConvertTo-Json)
+}
+
+# 4. Verify an idempotent replay. With AUTO_POST_ENABLED=true and no escalation,
+# step 2 already posted using the auto key.
+$key = if ($match.next_action -eq "posted") {
+  "auto:$($ingested.invoice.id)"
+} else {
+  "demo:$($ingested.invoice.id)"
+}
 $journal = Invoke-RestMethod -Method Post `
   -Uri http://localhost:8000/api/v1/post-payment-journal `
-  -Headers @{ "Idempotency-Key" = "auto:$($ingested.invoice.id)" } `
+  -Headers @{ "Idempotency-Key" = $key } `
   -ContentType application/json `
   -Body (@{ invoice_id = $ingested.invoice.id } | ConvertTo-Json)
 
-# 4. Inspect decision provenance
+# 5. Inspect decision provenance
 Invoke-RestMethod "http://localhost:8000/api/v1/audit-log?entity_id=$($ingested.invoice.id)"
 ```
 
@@ -214,22 +237,24 @@ The checked-in live-agent benchmark has seven synthetic AP documents and nine AR
 | Exception-routing recall | 100.00% |
 | Evaluation coverage | 100.00% |
 | Straight-through-processing rate | 57.14% |
+| AP conservative-escalation rate | 0.00% (0 / 4 eligible cases) |
 | False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
 | AR field-level extraction accuracy | 97.22% |
 | AR match-decision accuracy | 100.00% |
+| AR conservative-escalation rate | 0.00% (0 / 5 eligible cases) |
 | False cash-application rate | 0.00% |
 | RAGAS context precision | 88.89% |
 | RAGAS context recall | 88.89% |
 
-These are live local-model results, not deterministic-test-double scores. They validate controlled behavior, not production generalization. A production pilot must use representative, permissioned documents and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
+These are live local-model results, not deterministic-test-double scores. STP and conservative escalation are model-dependent and may vary across live runs; the checked-in result is the evidence from the recorded run. These metrics validate controlled behavior, not production generalization. A production pilot must use representative, permissioned documents and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
 
 ## Security and control posture
 
 - Containers run as a non-root user with a read-only filesystem and `no-new-privileges`.
 - API uploads are read incrementally from Starlette's spooled upload and stop at the configured size limit; mailbox attachments are allow-listed by extension.
 - Deterministic duplicate detection and hash-chained audit events support duplicate and tamper controls.
-- Posting requires a successful deterministic match and is idempotent.
+- Posting requires a successful deterministic match or explicit exception approval, an authorized `matched`/`approved` workflow state, and an idempotency key. Awaiting and rejected invoices cannot be posted through the mandatory endpoint.
 - Human decisions require a supplied actor and comment and become audit events. The actor is not authenticated in this prototype; production requires SSO/RBAC and segregation of duties.
 - No credentials are committed; `.env` is ignored.
 

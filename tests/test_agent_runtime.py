@@ -64,3 +64,4 @@ class AgentRuntimeContractTests(TestCase):
 
         self.assertEqual("ESCALATE", decision.action)
         self.assertEqual("literal ,} text", decision.reason)
+        self.assertIsNone(decision.confidence)

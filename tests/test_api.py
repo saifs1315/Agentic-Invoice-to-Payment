@@ -4,9 +4,10 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from langgraph.errors import GraphRecursionError
 
 from app.api import app
-from app.bootstrap import agent_runtime, ar_workflow, audit, workflow
+from app.bootstrap import agent_runtime, ar_workflow, audit, orchestrator, workflow
 from app.config import settings
 from app.domain import Remittance, Status
 from app.erp import ERPUnavailableError
@@ -22,6 +23,7 @@ class APITests(TestCase):
         self.assertTrue(health.json()["audit_chain_valid"])
         self.assertTrue(health.json()["capabilities"]["langgraph_active"])
         self.assertTrue(health.json()["capabilities"]["llamaindex_active"])
+        self.assertNotIn("repository_degraded", health.json()["capabilities"])
         missing = self.client.post(
             "/api/v1/post-payment-journal",
             headers={"Idempotency-Key": "missing"},
@@ -44,6 +46,20 @@ class APITests(TestCase):
         self.assertEqual(503, health.status_code)
         self.assertEqual("unavailable", health.json()["status"])
         self.assertTrue(health.json()["capabilities"]["ai_required"])
+
+    def test_graph_step_budget_exhaustion_returns_controlled_service_error(self):
+        with patch.object(
+            orchestrator,
+            "ingest",
+            side_effect=GraphRecursionError("configured workflow step budget exhausted"),
+        ):
+            response = self.client.post(
+                "/api/v1/ingest-document",
+                files={"file": ("document.json", "{}", "application/json")},
+            )
+
+        self.assertEqual(503, response.status_code)
+        self.assertTrue(response.json()["workflow_step_budget_exhausted"])
 
     def test_posted_invoice_cannot_be_rematched_through_api(self):
         payload = {

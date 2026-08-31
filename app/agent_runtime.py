@@ -31,7 +31,7 @@ class SupervisorDecision(BaseModel):
             "document_markers",
         ]
     ] = Field(default_factory=list, max_length=4)
-    confidence: float = Field(default=0.5, ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class DomainAgentDecision(BaseModel):
@@ -63,7 +63,7 @@ class DomainAgentDecision(BaseModel):
             "control_eligibility",
         ]
     ] = Field(default_factory=list, max_length=5)
-    confidence: float = Field(default=0.5, ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 T = TypeVar("T", bound=BaseModel)

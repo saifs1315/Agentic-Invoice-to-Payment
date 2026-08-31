@@ -137,3 +137,55 @@ class WorkflowTests(TestCase):
             "agent_action_vetoed",
             {event["action"] for event in self.audit.list(invoice.id)},
         )
+
+    def test_agent_escalation_cannot_be_bypassed_by_the_posting_endpoint(self):
+        class ConservativeRuntime(DeterministicTestAgentRuntime):
+            def decide(self, *, domain, stage, evidence, allowed_actions):
+                if stage == "evaluate_match":
+                    return DomainAgentDecision(
+                        action="ESCALATE",
+                        reason="Policy evidence warrants explicit human approval.",
+                        evidence_ids=["deterministic_result", "policy_ids"],
+                        confidence=0.8,
+                    )
+                return super().decide(
+                    domain=domain,
+                    stage=stage,
+                    evidence=evidence,
+                    allowed_actions=allowed_actions,
+                )
+
+        workflow = InvoiceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(),
+            ConservativeRuntime(),
+        )
+        workflow.ingest(self.invoice)
+        result = workflow.match(self.invoice.id)
+
+        self.assertEqual(Status.AWAITING_APPROVAL, self.invoice.status)
+        self.assertEqual("human-review", result["next_action"])
+        with self.assertRaisesRegex(ValueError, "awaiting_approval.*not authorized"):
+            workflow.post(self.invoice.id, "must-not-bypass-agent")
+
+        workflow.approve(self.invoice.id, "reviewer:test", True, "Reviewed escalation")
+        self.assertEqual(
+            "posted",
+            workflow.post(self.invoice.id, "approved-after-escalation")["status"],
+        )
+
+    def test_rejected_matched_invoice_cannot_be_posted(self):
+        workflow = InvoiceWorkflow(
+            self.repo,
+            self.audit,
+            self.erp,
+            Settings(require_human_approval=True),
+        )
+        workflow.ingest(self.invoice)
+        workflow.match(self.invoice.id)
+        workflow.approve(self.invoice.id, "reviewer:test", False, "Rejected after review")
+
+        with self.assertRaisesRegex(ValueError, "rejected.*not authorized"):
+            workflow.post(self.invoice.id, "rejected-invoice")

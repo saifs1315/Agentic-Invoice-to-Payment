@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from app.agent_runtime import AgentRuntime
 from app.ar_workflow import RemittanceWorkflow
 from app.audit import AuditLedger
 from app.document_processing import UnifiedDocumentProcessor
@@ -17,6 +18,7 @@ class OrchestratorState(TypedDict, total=False):
     document_kind: str
     payload: Invoice | Remittance
     response: dict[str, Any]
+    supervisor_decision: dict[str, Any]
 
 
 class FinanceOrchestrator:
@@ -28,11 +30,13 @@ class FinanceOrchestrator:
         audit: AuditLedger,
         ap_workflow: InvoiceWorkflow,
         ar_workflow: RemittanceWorkflow,
+        runtime: AgentRuntime | None = None,
     ) -> None:
         self.repo = repo
         self.audit = audit
         self.ap_workflow = ap_workflow
         self.ar_workflow = ar_workflow
+        self.runtime = runtime or ap_workflow.runtime
         self.processor = UnifiedDocumentProcessor()
         self.graph = self._build_graph()
 
@@ -78,10 +82,57 @@ class FinanceOrchestrator:
         return {}
 
     def _process_document(self, state: OrchestratorState) -> OrchestratorState:
-        return {"document": self.processor.process(state["envelope"])}
+        document = self.processor.process(state["envelope"])
+        self.audit.append(
+            "source_document",
+            document.source_ref,
+            "agent_tool_completed",
+            "tool:unified-document-processor",
+            {
+                "tool": "process_document",
+                "processing_mode": document.processing_mode,
+                "processing_attempts": document.processing_attempts,
+                "deterministic_kind": document.kind.value,
+            },
+        )
+        return {"document": document}
 
     def _classify_document(self, state: OrchestratorState) -> OrchestratorState:
         document = state["document"]
+        deterministic_kind = document.kind
+        decision = self.runtime.supervise(
+            {
+                "filename": document.filename,
+                "media_type": document.media_type,
+                "processing_mode": document.processing_mode,
+                "deterministic_kind": deterministic_kind.value,
+                "classification_reason": document.classification_reason,
+                "document_text_excerpt": document.text[:6000],
+                "allowed_actions": [
+                    "DISPATCH_AP",
+                    "DISPATCH_AR",
+                    "ESCALATE_CLASSIFICATION",
+                ],
+            }
+        )
+        expected_action = {
+            DocumentKind.AP_INVOICE: "DISPATCH_AP",
+            DocumentKind.AR_REMITTANCE: "DISPATCH_AR",
+            DocumentKind.UNKNOWN: None,
+        }[deterministic_kind]
+        if expected_action is not None and decision.action != expected_action:
+            document.kind = DocumentKind.UNKNOWN
+            document.classification_reason = "agent-deterministic-classification-conflict"
+        elif decision.action == "DISPATCH_AP":
+            document.kind = DocumentKind.AP_INVOICE
+            document.classification_reason = "supervisor-agent-ap-dispatch"
+        elif decision.action == "DISPATCH_AR":
+            document.kind = DocumentKind.AR_REMITTANCE
+            document.classification_reason = "supervisor-agent-ar-dispatch"
+        else:
+            document.kind = DocumentKind.UNKNOWN
+            document.classification_reason = "supervisor-agent-escalation"
+        decision_data = decision.model_dump()
         self.audit.append(
             "source_document",
             document.source_ref,
@@ -89,12 +140,17 @@ class FinanceOrchestrator:
             "agent:finance-orchestrator",
             {
                 "kind": document.kind.value,
+                "deterministic_kind": deterministic_kind.value,
                 "reason": document.classification_reason,
                 "processing_mode": document.processing_mode,
                 "processing_attempts": document.processing_attempts,
+                "supervisor_decision": decision_data,
             },
         )
-        return {"document_kind": document.kind.value}
+        return {
+            "document_kind": document.kind.value,
+            "supervisor_decision": decision_data,
+        }
 
     @staticmethod
     def _route_classification(state: OrchestratorState) -> str:
@@ -103,9 +159,12 @@ class FinanceOrchestrator:
     def _extract_typed_payload(self, state: OrchestratorState) -> OrchestratorState:
         document = state["document"]
         if document.kind == DocumentKind.AP_INVOICE:
-            payload: Invoice | Remittance = extract_invoice_from_document(document)
+            payload: Invoice | Remittance = extract_invoice_from_document(
+                document,
+                self.runtime,
+            )
         else:
-            payload = extract_remittance_from_document(document)
+            payload = extract_remittance_from_document(document, self.runtime)
         return {"payload": payload}
 
     @staticmethod
@@ -122,7 +181,9 @@ class FinanceOrchestrator:
             "response": {
                 "workflow_type": "ap",
                 "entity_id": invoice.id,
-                "classification": self._classification_response(state["document"]),
+                "classification": self._classification_response(
+                    state["document"], state.get("supervisor_decision")
+                ),
                 **ingested,
                 **matched,
             }
@@ -137,7 +198,9 @@ class FinanceOrchestrator:
             "response": {
                 "workflow_type": "ar",
                 "entity_id": remittance.id,
-                "classification": self._classification_response(state["document"]),
+                "classification": self._classification_response(
+                    state["document"], state.get("supervisor_decision")
+                ),
                 **response,
             }
         }
@@ -150,7 +213,9 @@ class FinanceOrchestrator:
             "entity_id": entity_id,
             "status": "exception",
             "next_action": "human-classification",
-            "classification": self._classification_response(document),
+            "classification": self._classification_response(
+                document, state.get("supervisor_decision")
+            ),
         }
         self.repo.save_finance_workflow_state(
             entity_id,
@@ -163,13 +228,19 @@ class FinanceOrchestrator:
         return {"response": response}
 
     @staticmethod
-    def _classification_response(document: CanonicalDocument) -> dict[str, Any]:
-        return {
+    def _classification_response(
+        document: CanonicalDocument,
+        supervisor_decision: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        response = {
             "kind": document.kind.value,
             "reason": document.classification_reason,
             "processing_mode": document.processing_mode,
             "evidence": document.processing_attempts,
         }
+        if supervisor_decision is not None:
+            response["supervisor_decision"] = supervisor_decision
+        return response
 
     def ingest(self, envelope: SourceEnvelope) -> dict[str, Any]:
         initial: OrchestratorState = {"envelope": envelope}
@@ -189,3 +260,36 @@ class FinanceOrchestrator:
                 else:
                     state.update(self._dispatch_ar(state))
         return state["response"]
+
+    def ingest_only(
+        self,
+        envelope: SourceEnvelope,
+        expected_kind: DocumentKind,
+    ) -> dict[str, Any]:
+        """Run the supervisor and extraction tool, but leave domain execution explicit."""
+        state: OrchestratorState = {"envelope": envelope}
+        state.update(self._register_source(state))
+        state.update(self._process_document(state))
+        state.update(self._classify_document(state))
+        if state["document_kind"] != expected_kind.value:
+            raise ValueError(
+                f"supervisor did not classify the document as {expected_kind.value}"
+            )
+        state.update(self._extract_typed_payload(state))
+        payload = state["payload"]
+        if expected_kind == DocumentKind.AP_INVOICE:
+            if not isinstance(payload, Invoice):
+                raise TypeError("AP route did not receive an invoice payload")
+            response = self.ap_workflow.ingest(payload)
+        else:
+            if not isinstance(payload, Remittance):
+                raise TypeError("AR route did not receive a remittance payload")
+            response = self.ar_workflow.ingest(payload, run=False)
+        return {
+            "workflow_type": "ap" if expected_kind == DocumentKind.AP_INVOICE else "ar",
+            "entity_id": payload.id,
+            "classification": self._classification_response(
+                state["document"], state.get("supervisor_decision")
+            ),
+            **response,
+        }

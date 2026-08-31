@@ -1,16 +1,31 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
-from app.repository import MemoryRepository, POLICIES, deterministic_embedding
+from app.agent_runtime import AIRuntimeUnavailableError, AgentRuntime, create_agent_runtime
+from app.config import Settings
+from app.repository import MemoryRepository, POLICIES
+
+
+POLICY_QUERIES = {
+    "ap": "invoice matching duplicate PO goods receipt posting approval",
+    "ar": "customer remittance open AR items currency amount cash application idempotent",
+}
 
 
 class ContextRetriever:
     """LlamaIndex document normalization plus repository/pgvector retrieval."""
 
-    def __init__(self, repository: MemoryRepository) -> None:
+    def __init__(
+        self,
+        repository: MemoryRepository,
+        runtime: AgentRuntime | None = None,
+        config: Settings | None = None,
+    ) -> None:
+        config = config or Settings()
         self.repository = repository
+        self.runtime = runtime or create_agent_runtime(config)
+        self.config = config
         self.documents = self._documents()
         self.index = self._index()
 
@@ -35,21 +50,25 @@ class ContextRetriever:
             from llama_index.core import VectorStoreIndex
             from llama_index.core.embeddings import BaseEmbedding
 
-            class LocalHashEmbedding(BaseEmbedding):
+            runtime = self.runtime
+
+            class RuntimeEmbedding(BaseEmbedding):
                 def _get_query_embedding(self, query: str) -> list[float]:
-                    return deterministic_embedding(query)
+                    return runtime.embed(query)
 
                 async def _aget_query_embedding(self, query: str) -> list[float]:
                     return self._get_query_embedding(query)
 
                 def _get_text_embedding(self, text: str) -> list[float]:
-                    return deterministic_embedding(text)
+                    return runtime.embed(text)
 
             return VectorStoreIndex.from_documents(
                 self.documents,
-                embed_model=LocalHashEmbedding(model_name="ledgerpilot-hash-768"),
+                embed_model=RuntimeEmbedding(model_name="ollama-embeddinggemma-768"),
             )
         except ImportError:
+            return None
+        except AIRuntimeUnavailableError:
             return None
 
     @staticmethod
@@ -57,21 +76,17 @@ class ContextRetriever:
         return f"policy-{POLICIES.index(policy) + 1}"
 
     def retrieve_with_ids(self, query: str, top_k: int = 2) -> list[tuple[str, str]]:
-        stopwords = {"a", "an", "and", "are", "be", "is", "it", "of", "or", "the", "to", "what"}
-        query_terms = set(re.findall(r"[a-z0-9]+", query.lower())) - stopwords
-        policy_terms = {
-            term
-            for policy in POLICIES
-            for term in re.findall(r"[a-z0-9]+", policy.lower())
-            if term not in stopwords
-        }
-        if not query_terms & policy_terms:
-            return []
-
         rankings: list[list[str]] = []
         if self.index is not None:
             nodes = self.index.as_retriever(similarity_top_k=len(POLICIES)).retrieve(query)
-            rankings.append([node.node.get_content() for node in nodes])
+            semantic = [
+                node.node.get_content()
+                for node in nodes
+                if node.score is None or node.score >= self.config.rag_similarity_threshold
+            ]
+            if not semantic:
+                return []
+            rankings.append(semantic)
         try:
             rankings.append(self.repository.search_policies(query, len(POLICIES)))
         except Exception:

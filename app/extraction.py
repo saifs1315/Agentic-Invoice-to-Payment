@@ -9,11 +9,10 @@ from datetime import date
 from decimal import Decimal
 from html import unescape
 from pathlib import Path
-from typing import Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.config import settings
 from app.domain import (
     MAX_MONETARY_AMOUNT,
     MAX_QUANTITY,
@@ -22,6 +21,9 @@ from app.domain import (
     InvoiceLine,
     Remittance,
 )
+
+if TYPE_CHECKING:
+    from app.agent_runtime import AgentRuntime
 
 
 FIELD_PATTERNS = {
@@ -190,46 +192,24 @@ def _text_from_payload(
         return content.decode("utf-8", errors="replace"), "fallback", attempts
 
 
-def _ollama_extract(text: str) -> dict[str, Any]:
-    from ollama import Client
-
-    prompt = (
-        "Extract the invoice into the supplied JSON schema. Use null for a missing PO number. "
-        "Never infer identifiers or amounts that are not in the document. Return JSON only.\n\n"
-        + text[:30000]
-    )
-    response = Client(host=settings.ollama_base_url).chat(
-        model=settings.ollama_model,
-        messages=[{"role": "user", "content": prompt}],
-        format=InvoicePayload.model_json_schema(),
-        options={"temperature": 0},
-    )
-    if isinstance(response, dict):
-        content = response["message"]["content"]
-    else:
-        content = response.message.content
-    return json.loads(content)
-
-
-def extract_invoice_from_document(document: CanonicalDocument) -> Invoice:
+def extract_invoice_from_document(
+    document: CanonicalDocument,
+    runtime: "AgentRuntime | None" = None,
+) -> Invoice:
     text = document.text
     mode = document.processing_mode
+    processing_mode = mode
     attempts = list(document.processing_attempts)
     if mode == "json":
         data: dict[str, Any] = json.loads(text)
     else:
-        data = {}
-        if settings.llm_extraction_enabled:
-            try:
-                data = _ollama_extract(text)
-                mode = "ollama"
-                attempts.append({"backend": "ollama", "outcome": "success"})
-            except Exception as exc:
-                attempts.append(
-                    {"backend": "ollama", "outcome": "failed", "reason": type(exc).__name__}
-                )
-                data = {}
-        if not data:
+        if runtime is not None:
+            payload = runtime.extract("ap", text, InvoicePayload)
+            data = payload.model_dump(mode="json")
+            mode = f"{processing_mode}+ollama-agent"
+            attempts.append({"backend": "ollama-agent", "outcome": "success"})
+        else:
+            data = {}
             for field, pattern in FIELD_PATTERNS.items():
                 match = re.search(pattern, text, re.IGNORECASE)
                 data[field] = match.group(1) if match else None
@@ -269,7 +249,9 @@ def extract_invoice_from_document(document: CanonicalDocument) -> Invoice:
     }
     confidence = {
         "json": 1.0,
-        "ollama": 0.88,
+        "pdf-text+ollama-agent": 0.88,
+        "easyocr+ollama-agent": 0.84,
+        "docling+ollama-agent": 0.86,
         "docling": 0.82,
         "pdf-text": 0.92,
         "easyocr": 0.80,
@@ -299,6 +281,7 @@ def extract_invoice(
     filename: str,
     source_ref: str,
     processor: str = "auto",
+    runtime: "AgentRuntime | None" = None,
 ) -> Invoice:
     text, mode, attempts = _text_from_payload(content, filename, processor)
     return extract_invoice_from_document(
@@ -309,26 +292,49 @@ def extract_invoice(
             text=text,
             processing_mode=mode,
             processing_attempts=attempts,
-        )
+        ),
+        runtime,
     )
 
 
-def extract_remittance_from_document(document: CanonicalDocument) -> Remittance:
+def extract_remittance_from_document(
+    document: CanonicalDocument,
+    runtime: "AgentRuntime | None" = None,
+) -> Remittance:
     if document.processing_mode == "json":
         data: dict[str, Any] = json.loads(document.text)
+        extraction_mode = "json"
+        attempts = list(document.processing_attempts)
+    elif runtime is not None:
+        agent_payload = runtime.extract("ar", document.text, RemittancePayload)
+        data = agent_payload.model_dump(mode="json")
+        extraction_mode = f"{document.processing_mode}+ollama-agent"
+        attempts = [
+            *document.processing_attempts,
+            {"backend": "ollama-agent", "outcome": "success"},
+        ]
     else:
         data = {}
         for field, pattern in REMITTANCE_PATTERNS.items():
             match = re.search(pattern, document.text, re.IGNORECASE)
             data[field] = match.group(1) if match else None
+        extraction_mode = document.processing_mode
+        attempts = list(document.processing_attempts)
     required = ["customer_id", "reference", "amount", "currency", "open_item_refs"]
     missing = [field for field in required if not data.get(field)]
     if missing:
         raise ValueError(f"missing required remittance fields: {', '.join(missing)}")
     payload = RemittancePayload.model_validate(data)
-    evidence = {field: f"{document.processing_mode}:{field}" for field in required}
-    confidence = {"json": 1.0, "pdf-text": 0.92, "easyocr": 0.80}.get(
-        document.processing_mode, 0.82
+    evidence = {field: f"{extraction_mode}:{field}" for field in required}
+    confidence = {
+        "json": 1.0,
+        "pdf-text+ollama-agent": 0.88,
+        "easyocr+ollama-agent": 0.84,
+        "docling+ollama-agent": 0.86,
+        "pdf-text": 0.92,
+        "easyocr": 0.80,
+    }.get(
+        extraction_mode, 0.82
     )
     return Remittance(
         customer_id=payload.customer_id,
@@ -339,8 +345,8 @@ def extract_remittance_from_document(document: CanonicalDocument) -> Remittance:
         source_ref=document.source_ref,
         confidence=confidence,
         evidence=evidence,
-        extraction_mode=document.processing_mode,
-        extraction_attempts=list(document.processing_attempts),
+        extraction_mode=extraction_mode,
+        extraction_attempts=attempts,
     )
 
 

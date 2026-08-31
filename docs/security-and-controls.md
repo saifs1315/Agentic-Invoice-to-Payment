@@ -15,6 +15,9 @@
 - The application container reaches ERP facts and posting only through an HTTP client boundary; the Mock ERP service independently revalidates posting facts and returns explicit conflicts.
 - AR applies cash only after deterministic customer-scoped open-item, currency, and exact-amount matching. Invalid AR matches cannot be human-approved into an application; corrections must be re-matched.
 - Ambiguous source documents enter classification review and never reach AP or AR posting logic.
+- Production requires Ollama plus both pinned models. Runtime/model failure returns `503`; no regex-only or deterministic-only path can complete a finance action.
+- Every agent response is Pydantic-validated and checked against a stage-specific action allow-list. Deterministic match and posting guards cannot be overridden by model output.
+- `AGENT_RUNTIME=fake` is rejected unless `APP_ENV=test`, preventing the deterministic test double from being enabled accidentally in a deployed environment.
 - Audit events are append-only in the application and hash-chained.
 - Secrets are supplied through environment variables; `.env` is excluded from Git.
 - The API container runs as non-root, read-only, and without privilege escalation.

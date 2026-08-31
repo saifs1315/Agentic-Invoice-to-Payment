@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-LedgerPilot passed all 49 automated unit, API, control, workflow, context, and audit tests. The AP benchmark remains seven synthetic documents; the AR benchmark adds nine documents across JSON, text, PDF, PNG, and HTML. AR scored 100% evaluation coverage, document classification, match decisions, exception classification, and audit-chain integrity, with 97.22% labeled field extraction due to one OCR field miss. No ineligible invoice was auto-posted and no invalid remittance caused cash application. A strengthened nine-query policy dataset scored 88.89% RAGAS non-LLM context precision and recall.
+LedgerPilot passed all 53 automated unit, API, runtime, control, workflow, context, and audit tests. The mandatory live-agent AP benchmark covers seven synthetic documents; the mirrored AR benchmark covers nine documents across JSON, text, PDF, PNG, and HTML. AP scored 88.57% labeled field extraction and AR scored 94.44%; both scored 100% evaluation coverage, finance decisions, exception classification, and audit-chain integrity. No ineligible invoice was auto-posted and no invalid remittance caused cash application. A nine-query EmbeddingGemma policy dataset scored 88.89% RAGAS non-LLM context precision and recall.
 
 These results demonstrate implementation correctness against known fixtures. They do not estimate production accuracy across diverse vendor layouts, scans, languages, handwriting, or adversarial documents.
 
@@ -21,12 +21,12 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 
 ## Pipeline under test
 
-- JSON uses strict Pydantic validation.
+- JSON uses strict Pydantic validation for document fields; the supervisor and AP/AR action agents remain mandatory.
 - Text-native PDFs use local PDF text extraction first; Docling remains the rich-layout fallback.
 - Images use local EasyOCR; Docling is the fallback when a direct OCR path is unavailable. The HTML fixture explicitly forces Docling so that path is measured in every full evaluation.
 - A shared processor produces one canonical document and classifies it as AP, AR, or ambiguous before the domain extractor runs.
 - AP invoices and AR remittances use separate typed schemas after classification.
-- Extraction records the selected backend and the success/failure type of each attempted backend.
+- Extraction records both layers, for example `pdf-text+ollama-agent`, plus every backend attempt and outcome.
 - A parent LangGraph dispatches to AP and AR LangGraph subgraphs. Each retrieves policy context, runs deterministic controls, and conditionally routes to HTTP ERP posting or human review.
 - Policy retrieval uses a real LlamaIndex `VectorStoreIndex` fused with repository/pgvector ranking.
 
@@ -48,7 +48,7 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 
 | Metric | Result |
 |---|---:|
-| Field-level extraction accuracy | 100.00% |
+| Field-level extraction accuracy | 88.57% |
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
 | Exception-routing recall | 100.00% |
@@ -66,19 +66,19 @@ Labels are stored in `evaluation/dataset.json`; documents are in `evaluation/fix
 |---|---:|
 | Evaluation coverage | 100.00% |
 | Document classification accuracy | 100.00% |
-| Field-level extraction accuracy | 97.22% |
+| Field-level extraction accuracy | 94.44% |
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
 | False cash-application rate | 0.00% |
 | Audit-chain integrity | 100.00% |
 
-AR per-format field accuracy is JSON 100% (5), text 100% (1), PDF 100% (1), HTML 100% (1), and scan 75% (1). The scan still reached the correct deterministic finance decision; the result is reported rather than hidden because this benchmark is intended to expose extraction risk.
+AR per-format field accuracy is JSON 100% (5), text 100% (1), PDF 100% (1), HTML 75% (1), and scan 75% (1). Both lower-extraction cases still reached the correct deterministic finance decision; the result is reported rather than hidden because this benchmark is intended to expose extraction risk.
 
-AP per-format field and decision accuracy were 100% for JSON (3), PDF (2), PNG (1), and HTML/Docling (1). Results are reproducible with `python evaluation/run_evaluation.py`, `python evaluation/run_ar_evaluation.py`, and `python evaluation/run_rag_evaluation.py`. Machine-readable evidence is checked in under `evaluation/results/`.
+AP field accuracy was JSON 100% (3), PDF 80% (2), PNG 80% (1), and HTML/Docling 80% (1); decision accuracy was 100% for every format. Results are reproducible with `python evaluation/run_evaluation.py`, `python evaluation/run_ar_evaluation.py`, and `python evaluation/run_rag_evaluation.py`. Machine-readable evidence is checked in under `evaluation/results/`.
 
 ## Automated verification
 
-Forty-nine tests cover the original AP controls plus shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, terminal AP transition guards, audited ERP failures, non-PO override parity, runtime environment reloading, bounded uploads, API dispatch, durable generic workflow state, and the unified exception surface.
+Fifty-three tests cover the original AP controls plus mandatory-runtime configuration, schema-constrained agent contracts, shared AP/AR classification, canonical extraction, parent-graph dispatch, ambiguous-document escalation, AR graph transitions, partial-payment correction and full re-match, prohibition on force-approving invalid AR matches, valid AR human approval, cash idempotency, Mock ERP HTTP PO/GR/journal/open-item/cash contracts, terminal AP transition guards, audited ERP failures, non-PO override parity, bounded uploads, API dispatch, durable generic workflow state, and the unified exception surface.
 
 ## Production pilot plan
 
@@ -98,6 +98,6 @@ Forty-nine tests cover the original AP controls plus shared AP/AR classification
 - Fixtures are intentionally authored in parser-friendly layouts; the 100% result demonstrates regression correctness, not template generalization.
 - The ERP is a separate stateful Mock API over HTTP, not a vendor sandbox. Authentication, vendor-specific schemas, and realistic network latency are not measured.
 - Human-review timing and reviewer agreement are not measured.
-- Ollama extraction and Phoenix tracing remain optional profiles and require their services to be started.
-- The offline hash/lexical retriever missed one paraphrased posting-retry query in the nine-case set; a production pilot should replace it with a governed semantic embedding model and a substantially larger labeled corpus.
+- Ollama, Qwen, EmbeddingGemma, and Phoenix are mandatory Compose services. The application fails closed when the AI runtime or either model is unavailable.
+- EmbeddingGemma retrieved the correct references for all eight finance-policy cases, including the two-policy query, but did not abstain on the out-of-domain meal-reimbursement query. A production pilot needs a larger labeled corpus and a calibrated abstention threshold.
 - Cumulative prior invoicing per PO line is not modeled; partial invoices are checked against ordered and received upper bounds in the current transaction only.

@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+from app.agent_runtime import AgentRuntime, create_agent_runtime
 from app.audit import AuditLedger
 from app.config import Settings
 from app.context import ContextRetriever
 from app.domain import Invoice, Status
 from app.erp import ERPClient, ERPError
-from app.llm import DecisionExplainer
 from app.matching import match_invoice
 from app.repository import MemoryRepository
 
@@ -16,21 +16,52 @@ class WorkflowState(TypedDict, total=False):
     invoice_id: str
     require_goods_receipt: bool
     policies: list[str]
+    policy_ids: list[str]
     result: dict[str, Any]
     explanation: str
     next_action: str
     journal: dict[str, Any]
     error: dict[str, Any]
+    agent_decisions: list[dict[str, Any]]
 
 
 class InvoiceWorkflow:
     """LangGraph-orchestrated AP flow with deterministic financial controls."""
 
-    def __init__(self, repo: MemoryRepository, audit: AuditLedger, erp: ERPClient, config: Settings) -> None:
+    def __init__(
+        self,
+        repo: MemoryRepository,
+        audit: AuditLedger,
+        erp: ERPClient,
+        config: Settings,
+        runtime: AgentRuntime | None = None,
+    ) -> None:
         self.repo, self.audit, self.erp, self.config = repo, audit, erp, config
-        self.context = ContextRetriever(repo)
-        self.explainer = DecisionExplainer(config)
+        self.runtime = runtime or create_agent_runtime(config)
+        self.context = ContextRetriever(repo, self.runtime, config)
         self.graph = self._build_graph()
+
+    def _agent_decide(
+        self,
+        invoice_id: str,
+        stage: str,
+        evidence: dict[str, Any],
+        allowed_actions: list[str],
+    ) -> dict[str, Any]:
+        decision = self.runtime.decide(
+            domain="ap",
+            stage=stage,
+            evidence=evidence,
+            allowed_actions=allowed_actions,
+        ).model_dump()
+        self.audit.append(
+            "invoice",
+            invoice_id,
+            "agent_decision",
+            "agent:ap",
+            {"stage": stage, "allowed_actions": allowed_actions, **decision},
+        )
+        return decision
 
     def _build_graph(self):
         try:
@@ -67,30 +98,87 @@ class InvoiceWorkflow:
         )
 
     def _graph_retrieve_policy(self, state: WorkflowState) -> WorkflowState:
+        query = "invoice matching duplicate PO goods receipt posting approval"
+        decision = self._agent_decide(
+            state["invoice_id"],
+            "retrieve_policy",
+            {"expected_action": "RETRIEVE_POLICY", "query": query},
+            ["RETRIEVE_POLICY"],
+        )
+        policies_with_ids = self.context.retrieve_with_ids(query)
         update: WorkflowState = {
-            "policies": self.context.retrieve("invoice matching duplicate PO goods receipt posting approval")
+            "policies": [policy for _, policy in policies_with_ids],
+            "policy_ids": [policy_id for policy_id, _ in policies_with_ids],
+            "agent_decisions": [*state.get("agent_decisions", []), decision],
         }
         self._persist("retrieve_policy", {**state, **update})
         return update
 
     def _graph_match(self, state: WorkflowState) -> WorkflowState:
+        match_decision = self._agent_decide(
+            state["invoice_id"],
+            "request_erp_match",
+            {
+                "expected_action": "RUN_AP_MATCH",
+                "policies": state.get("policies", []),
+                "policy_ids": state.get("policy_ids", []),
+                "require_goods_receipt": state.get("require_goods_receipt", True),
+            },
+            ["RUN_AP_MATCH"],
+        )
         result, explanation = self._match_core(
             state["invoice_id"],
             state.get("require_goods_receipt", True),
             state.get("policies", []),
         )
-        update: WorkflowState = {"result": result, "explanation": explanation}
+        expected_action = (
+            "POST_PAYMENT_JOURNAL"
+            if result["matched"]
+            and self.config.auto_post_enabled
+            and not self.config.require_human_approval
+            else "ESCALATE"
+        )
+        decision = self._agent_decide(
+            state["invoice_id"],
+            "evaluate_match",
+            {
+                "expected_action": expected_action,
+                "deterministic_result": result,
+                "policies": state.get("policies", []),
+                "policy_ids": state.get("policy_ids", []),
+            },
+            [expected_action],
+        )
+        update: WorkflowState = {
+            "result": result,
+            "explanation": explanation,
+            "agent_decisions": [
+                *state.get("agent_decisions", []),
+                match_decision,
+                decision,
+            ],
+        }
         self._persist("deterministic_match", {**state, **update})
         return update
 
     def _route_after_match(self, state: WorkflowState) -> str:
         matched = bool(state["result"]["matched"])
-        if matched and self.config.auto_post_enabled and not self.config.require_human_approval:
+        action = state.get("agent_decisions", [{}])[-1].get("action")
+        if (
+            matched
+            and action == "POST_PAYMENT_JOURNAL"
+            and self.config.auto_post_enabled
+            and not self.config.require_human_approval
+        ):
             return "post"
         return "review"
 
     def _graph_post(self, state: WorkflowState) -> WorkflowState:
-        journal = self.post(state["invoice_id"], f"auto:{state['invoice_id']}")
+        journal = self.post(
+            state["invoice_id"],
+            f"auto:{state['invoice_id']}",
+            require_agent_decision=False,
+        )
         update: WorkflowState = {"next_action": "posted", "journal": journal}
         self._persist("auto_post", {**state, **update})
         return update
@@ -177,7 +265,11 @@ class InvoiceWorkflow:
         self.repo.save_match(result)
         invoice.status = Status.MATCHED if result.matched else Status.EXCEPTION
         self.repo.save_invoice(invoice)
-        explanation = self.explainer.explain(result.to_dict())
+        explanation = (
+            "Deterministic AP controls passed."
+            if result.matched
+            else "Deterministic AP controls found blocking variances; human review is required."
+        )
         self.audit.append(
             "invoice",
             invoice.id,
@@ -209,16 +301,23 @@ class InvoiceWorkflow:
         if self.graph is not None:
             state = self.graph.invoke(initial)
         else:
-            policies = self.context.retrieve("invoice matching duplicate PO goods receipt posting approval")
-            result, explanation = self._match_core(invoice_id, require_goods_receipt, policies)
-            state = {**initial, "policies": policies, "result": result, "explanation": explanation}
+            state = {**initial, **self._graph_retrieve_policy(initial)}
+            state.update(self._graph_match(state))
             if self._route_after_match(state) == "post":
                 state.update(self._graph_post(state))
             else:
                 state.update(self._graph_finalize(state))
         return {
             key: state[key]
-            for key in ("result", "next_action", "journal", "policies", "explanation")
+            for key in (
+                "result",
+                "next_action",
+                "journal",
+                "policies",
+                "policy_ids",
+                "explanation",
+                "agent_decisions",
+            )
             if key in state
         }
 
@@ -241,7 +340,13 @@ class InvoiceWorkflow:
         )
         return {"invoice_id": invoice.id, "status": invoice.status.value}
 
-    def post(self, invoice_id: str, idempotency_key: str, actor: str = "agent:poster") -> dict[str, Any]:
+    def post(
+        self,
+        invoice_id: str,
+        idempotency_key: str,
+        actor: str = "agent:poster",
+        require_agent_decision: bool = True,
+    ) -> dict[str, Any]:
         invoice = self._invoice_or_raise(invoice_id)
         existing = self.repo.get_journal(invoice_id, idempotency_key)
         if existing:
@@ -251,6 +356,17 @@ class InvoiceWorkflow:
             raise ValueError("invoice does not have a successful match or explicit exception approval")
         if self.config.require_human_approval and invoice.status != Status.APPROVED:
             raise ValueError("human approval is required before posting")
+        if require_agent_decision:
+            self._agent_decide(
+                invoice_id,
+                "manual_post_request",
+                {
+                    "expected_action": "POST_PAYMENT_JOURNAL",
+                    "invoice_status": invoice.status.value,
+                    "match": match.to_dict(),
+                },
+                ["POST_PAYMENT_JOURNAL"],
+            )
         try:
             journal = self.erp.post_payment_journal(invoice, idempotency_key)
         except ERPError as exc:

@@ -6,10 +6,14 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql://ledgerpilot:ledgerpilot@postgres:5432/ledgerpilot}
+      AGENT_RUNTIME: ollama
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
-      LLM_EXTRACTION_ENABLED: ${LLM_EXTRACTION_ENABLED:-false}
-      LLM_EXPLANATIONS_ENABLED: ${LLM_EXPLANATIONS_ENABLED:-false}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:2b-q4_K_M}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-embeddinggemma}
+      OLLAMA_TIMEOUT_SECONDS: ${OLLAMA_TIMEOUT_SECONDS:-300}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+      AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-8}
+      RAG_SIMILARITY_THRESHOLD: ${RAG_SIMILARITY_THRESHOLD:-0.05}
       PHOENIX_COLLECTOR_ENDPOINT: http://phoenix:4317
       ERP_MODE: http
       ERP_BASE_URL: http://mock-erp:8080
@@ -35,6 +39,10 @@ services:
         condition: service_healthy
       mock-erp:
         condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+      phoenix:
+        condition: service_started
     restart: unless-stopped
     security_opt: ["no-new-privileges:true"]
     read_only: true
@@ -70,16 +78,40 @@ services:
       retries: 20
 
   ollama:
-    image: ollama/ollama:0.11.4
-    profiles: ["ai"]
+    image: ollama/ollama:0.30.8
+    environment:
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_KEEP_ALIVE: "2m"
     volumes: ["ollama-data:/root/.ollama"]
     ports: ["11434:11434"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  ollama-init:
+    image: ollama/ollama:0.30.8
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        ollama pull ${OLLAMA_MODEL:-qwen3.5:2b-q4_K_M} &&
+        ollama pull ${OLLAMA_EMBEDDING_MODEL:-embeddinggemma}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
 
   phoenix:
     image: arizephoenix/phoenix:11.25.0
-    profiles: ["observability"]
     ports: ["6006:6006", "4317:4317"]
     volumes: ["phoenix-data:/mnt/data"]
+    restart: unless-stopped
 
 volumes:
   postgres-data:

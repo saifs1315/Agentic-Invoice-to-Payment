@@ -1,8 +1,9 @@
 stateDiagram-v2
   [*] --> CanonicalDocument
-  CanonicalDocument --> ClassificationReview: ambiguous
-  CanonicalDocument --> APSubgraph: AP invoice
-  CanonicalDocument --> ARSubgraph: AR remittance
+  CanonicalDocument --> SupervisorAgent: processor tool evidence
+  SupervisorAgent --> ClassificationReview: ambiguous / conflict
+  SupervisorAgent --> APSubgraph: DISPATCH_AP
+  SupervisorAgent --> ARSubgraph: DISPATCH_AR
   APSubgraph --> APException: PO / GR / variance control fails
   APSubgraph --> PaymentJournal: match + approval policy passes
   ARSubgraph --> ARException: allocation control fails

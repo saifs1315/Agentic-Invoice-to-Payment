@@ -2,7 +2,7 @@
 
 ## Design principles
 
-1. **AI interprets; controls decide.** Docling, Ollama, and LlamaIndex support extraction and context. Exact matching, tolerance enforcement, approval state, and posting eligibility remain deterministic.
+1. **AI operates; controls constrain.** The local Qwen agent classifies, extracts unstructured documents, selects tools, and chooses bounded next actions. Exact matching, tolerance enforcement, approval state, action allow-lists, and posting eligibility remain deterministic.
 2. **Every transition is attributable.** Audit events include source references, evidence, policy context, variances, actor, ERP response, timestamps, and a hash link to the previous event.
 3. **Adapters isolate external systems.** Microsoft Graph and the ERP client sit behind explicit boundaries. The default Compose path uses a separate FastAPI Mock ERP over HTTP, so integration contracts, transport failures, status codes, and idempotency are testable without production credentials.
 4. **Exceptions are first-class states.** The workflow stops on missing evidence or an out-of-policy variance and waits for a named human decision.
@@ -16,29 +16,31 @@ The rendered diagram is [diagrams/architecture.svg](diagrams/architecture.svg); 
 
 1. The Graph adapter polls a scoped shared mailbox, or a caller uploads an attachment.
 2. A SHA-256 source reference is assigned before extraction.
-3. The unified processor converts PDF/image/HTML/text/JSON once. Local PDF text extraction or EasyOCR handles common inputs; Docling is the rich-layout fallback. All paths retain evidence, confidence, the selected backend, and failed-backend attempt types.
-4. Deterministic field and text markers classify the canonical document as `ap_invoice`, `ar_remittance`, or `unknown`. An endpoint or mailbox configuration can supply an explicit domain hint. Ambiguous input enters `classification_review` and is never posted.
-5. The parent LangGraph builds the correct Pydantic-validated payload and dispatches to the AP or AR subgraph. Generic `finance_workflow_runs` persist domain, source, node, status, and state without an invoice-only foreign key.
+3. The orchestrator invokes the unified document processor as a tool. PDF text extraction or EasyOCR handles common inputs; Docling is the rich-layout fallback. The tool returns canonical text, deterministic candidate classification, evidence, confidence, and backend attempts, but it cannot dispatch or post.
+4. The mandatory supervisor agent observes that evidence and returns schema-constrained `DISPATCH_AP`, `DISPATCH_AR`, or `ESCALATE_CLASSIFICATION`. A conflict with strong deterministic evidence is forced to review; ambiguity is never posted.
+5. The parent LangGraph builds a Pydantic-validated payload. Non-JSON documents use schema-constrained Qwen extraction; structured JSON remains deterministic input parsing, while supervisor and domain agent decisions are still mandatory. The graph then invokes the AP or AR agent subgraph.
+6. Generic `finance_workflow_runs` persist domain, source, current node, decisions, retrieved context, and results. The audit chain separately records each processor tool completion and agent decision.
 
 ## AP subgraph
 
-1. LlamaIndex/pgvector retrieves AP policy context.
-2. The HTTP ERP client reads the PO and Goods Receipt endpoints and builds the matching facts.
-3. Deterministic code validates line arithmetic, invoice totals, duplicates, vendor/currency, tolerances, ordered quantities, and received quantities.
-4. A clean match follows approval policy and posts an idempotent Payment Journal through the Mock ERP HTTP API. Exceptions enter the human queue.
+1. The AP agent chooses the allow-listed `RETRIEVE_POLICY` tool. `embeddinggemma`, LlamaIndex, and pgvector return labeled policy evidence.
+2. The agent chooses `RUN_AP_MATCH`; the HTTP ERP tool reads the PO and Goods Receipt and deterministic code validates arithmetic, duplicates, vendor/currency, tolerances, quantities, and receipts.
+3. The agent observes the control result and must choose the single permitted guarded outcome: `POST_PAYMENT_JOURNAL` for an eligible clean match or `ESCALATE` otherwise.
+4. The posting tool independently revalidates successful match/approval state and idempotency before calling the Mock ERP. Exceptions enter the human queue.
 5. The Mock ERP revalidates PO/vendor/currency at the posting boundary. A missing-PO journal is accepted only when the workflow transmits an explicit previously recorded human exception approval; audit events retain match evidence, policies, human decisions, and the ERP response.
 
 ## AR subgraph
 
-1. The same canonical processor extracts a typed remittance from JSON, text, PDF, image, or HTML.
-2. The AR graph retrieves cash-application policy and calls the Mock ERP open-items endpoint for the extracted customer.
-3. Deterministic allocation checks duplicate reference, customer ownership (through the customer-scoped ERP read), item existence/open status, currency, and exact selected-item total.
-4. Clean allocations are applied through the idempotent cash API. Partial, overpayment, currency, missing/closed item, customer, or duplicate conditions become exceptions.
+1. The same processor tool and supervisor produce and route a typed remittance from JSON, text, PDF, image, or HTML.
+2. The AR agent chooses `RETRIEVE_POLICY`, then `RUN_AR_MATCH`; the ERP tool supplies current open items.
+3. Deterministic allocation checks duplicate reference, customer ownership, item existence/open status, currency, and exact selected-item total.
+4. The agent must choose `APPLY_CASH` only when those controls pass, otherwise `ESCALATE`. The cash tool revalidates state and idempotency at the ERP boundary.
 5. Reviewers may correct and retry, reject, or record manual resolution. Corrections always return through the full match and current-state ERP checks. `APPROVE_APPLY` exists only for a valid match awaiting configured human approval; it cannot override an invalid allocation.
 
 ## Failure and retry behavior
 
 - Upload validation failures return `422`; oversize files return `413`.
+- Missing Ollama, Qwen, or embedding model readiness returns `503`; there is no production non-AI completion path. The deterministic fake runtime is accepted only with `APP_ENV=test`.
 - Missing records return `404`; invalid workflow transitions return `409`.
 - Posted, rejected, resolved, or already-approved AP invoices cannot be re-matched into an earlier state.
 - ERP business conflicts return `409`; transport/server failures return `503`. Failed lookup, journal, and cash operations are audited without advancing to a posted state.

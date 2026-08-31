@@ -60,6 +60,14 @@ class OrchestratorTests(TestCase):
         self.assertEqual("ap", response["workflow_type"])
         self.assertTrue(response["result"]["matched"])
         self.assertEqual("ap_invoice", response["classification"]["kind"])
+        self.assertEqual(
+            "DISPATCH_AP",
+            response["classification"]["supervisor_decision"]["action"],
+        )
+        self.assertEqual(
+            ["RETRIEVE_POLICY", "RUN_AP_MATCH", "POST_PAYMENT_JOURNAL"],
+            [decision["action"] for decision in response["agent_decisions"]],
+        )
 
     def test_parent_graph_dispatches_ar_to_the_ar_subgraph(self):
         response = self.orchestrator.ingest(
@@ -77,6 +85,10 @@ class OrchestratorTests(TestCase):
         self.assertEqual("ar", response["workflow_type"])
         self.assertTrue(response["result"]["applied"])
         self.assertEqual("ar_remittance", response["classification"]["kind"])
+        self.assertEqual(
+            ["RETRIEVE_POLICY", "RUN_AR_MATCH", "APPLY_CASH"],
+            [decision["action"] for decision in response["agent_decisions"]],
+        )
 
     def test_parent_graph_routes_ambiguous_input_to_classification_review(self):
         response = self.orchestrator.ingest(envelope(None))

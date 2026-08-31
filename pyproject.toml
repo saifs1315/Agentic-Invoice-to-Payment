@@ -27,6 +27,7 @@ dependencies = [
   "transformers==4.57.6",
   "arize-phoenix-otel==0.13.1",
   "openinference-instrumentation-langchain==0.1.51",
+  "wrapt==1.17.2",
 ]
 
 [project.optional-dependencies]

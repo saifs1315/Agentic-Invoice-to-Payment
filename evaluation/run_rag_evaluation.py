@@ -13,6 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.context import ContextRetriever
+from app.agent_runtime import create_agent_runtime
+from app.config import Settings
 from app.repository import MemoryRepository, POLICIES
 
 
@@ -25,7 +27,9 @@ async def evaluate() -> dict[str, object]:
     from ragas.metrics import NonLLMContextPrecisionWithReference, NonLLMContextRecall
 
     dataset = json.loads((ROOT / "policy_dataset.json").read_text(encoding="utf-8"))
-    retriever = ContextRetriever(MemoryRepository())
+    config = Settings()
+    runtime = create_agent_runtime(config)
+    retriever = ContextRetriever(MemoryRepository(runtime.embed), runtime, config)
     precision_metric = NonLLMContextPrecisionWithReference()
     recall_metric = NonLLMContextRecall()
     rows = []
@@ -80,7 +84,8 @@ async def evaluate() -> dict[str, object]:
         "cases": rows,
         "notes": (
             "Offline RAGAS non-LLM context precision and recall over paraphrased, multi-policy, "
-            "and out-of-domain cases; no external LLM or embedding API is used."
+            "and out-of-domain cases using the required local Ollama embedding model; no external "
+            "AI API is used."
         ),
     }
     output = ROOT / "results" / "rag-latest.json"

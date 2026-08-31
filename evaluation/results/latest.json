@@ -2,15 +2,15 @@
   "dataset_size": 7,
   "evaluation_coverage": 1.0,
   "extraction_modes": {
-    "docling": 1,
-    "easyocr": 1,
+    "docling+ollama-agent": 1,
+    "easyocr+ollama-agent": 1,
     "json": 3,
-    "pdf-text": 2
+    "pdf-text+ollama-agent": 2
   },
   "formats": {
     "html": {
       "documents": 1,
-      "field_accuracy": 1.0,
+      "field_accuracy": 0.8,
       "decision_accuracy": 1.0
     },
     "json": {
@@ -20,16 +20,16 @@
     },
     "pdf": {
       "documents": 2,
-      "field_accuracy": 1.0,
+      "field_accuracy": 0.8,
       "decision_accuracy": 1.0
     },
     "png": {
       "documents": 1,
-      "field_accuracy": 1.0,
+      "field_accuracy": 0.8,
       "decision_accuracy": 1.0
     }
   },
-  "field_level_extraction_accuracy": 1.0,
+  "field_level_extraction_accuracy": 0.8857,
   "document_exact_match_rate": 1.0,
   "exception_classification_accuracy": 1.0,
   "exception_routing_recall": 1.0,
@@ -38,5 +38,5 @@
   "mean_extraction_confidence": 0.9229,
   "audit_chain_integrity_rate": 1.0,
   "failed_documents": [],
-  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. Finance decisions remain deterministic; production validation requires permissioned vendor samples."
+  "notes": "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, and a forced-Docling HTML case. The live agent performs extraction and bounded action selection while deterministic finance controls remain authoritative. Production validation still requires permissioned vendor samples."
 }

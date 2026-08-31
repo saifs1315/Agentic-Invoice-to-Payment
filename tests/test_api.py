@@ -5,7 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.api import app
-from app.bootstrap import audit, workflow
+from app.bootstrap import agent_runtime, audit, workflow
 from app.config import settings
 from app.erp import ERPUnavailableError
 
@@ -26,6 +26,22 @@ class APITests(TestCase):
             json={"invoice_id": "inv_missing"},
         )
         self.assertEqual(404, missing.status_code)
+
+    def test_health_is_unavailable_when_mandatory_ai_models_are_not_ready(self):
+        unavailable = {
+            "runtime": "ollama",
+            "reachable": True,
+            "generation_model": "qwen3.5:2b-q4_K_M",
+            "generation_model_ready": False,
+            "embedding_model": "embeddinggemma",
+            "embedding_model_ready": True,
+            "ready": False,
+        }
+        with patch.object(agent_runtime, "capabilities", return_value=unavailable):
+            health = self.client.get("/api/v1/health")
+        self.assertEqual(503, health.status_code)
+        self.assertEqual("unavailable", health.json()["status"])
+        self.assertTrue(health.json()["capabilities"]["ai_required"])
 
     def test_posted_invoice_cannot_be_rematched_through_api(self):
         payload = {

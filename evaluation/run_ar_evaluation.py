@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -13,8 +14,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.ar_workflow import RemittanceWorkflow
+from app.agent_runtime import create_agent_runtime
 from app.audit import AuditLedger
 from app.config import Settings
+from app.context import POLICY_QUERIES
 from app.document_processing import UnifiedDocumentProcessor
 from app.domain import DocumentKind, SourceEnvelope
 from app.erp import MockERP
@@ -26,7 +29,24 @@ ROOT = Path(__file__).resolve().parent
 
 
 def evaluate() -> dict:
+    config = Settings()
+    runtime = create_agent_runtime(config)
+    MemoryRepository(runtime.embed)
+    runtime.embed(POLICY_QUERIES["ar"])
     dataset = json.loads((ROOT / "ar_dataset.json").read_text(encoding="utf-8"))
+    requested_files = {
+        value.strip().replace("\\", "/")
+        for value in os.getenv("EVALUATION_FILES", "").split(",")
+        if value.strip()
+    }
+    if requested_files:
+        dataset = [
+            item
+            for item in dataset
+            if item["file"] in requested_files or Path(item["file"]).name in requested_files
+        ]
+    if not dataset:
+        raise ValueError("evaluation filters did not select any AR dataset items")
     field_hits = field_total = classification_hits = match_hits = exception_hits = 0
     false_cash_applications = audit_valid = 0
     by_format: dict[str, dict[str, int]] = defaultdict(
@@ -41,8 +61,8 @@ def evaluate() -> dict:
         bucket["documents"] += 1
         bucket["field_total"] += len(item["expected_fields"])
         field_total += len(item["expected_fields"])
-        repo, audit, erp = MemoryRepository(), AuditLedger(), MockERP()
-        workflow = RemittanceWorkflow(repo, audit, erp, Settings())
+        repo, audit, erp = MemoryRepository(runtime.embed), AuditLedger(), MockERP()
+        workflow = RemittanceWorkflow(repo, audit, erp, config, runtime)
         try:
             content = path.read_bytes()
             envelope = SourceEnvelope(
@@ -54,7 +74,7 @@ def evaluate() -> dict:
             )
             document = UnifiedDocumentProcessor().process(envelope)
             classification_hits += document.kind == DocumentKind.AR_REMITTANCE
-            remittance = extract_remittance_from_document(document)
+            remittance = extract_remittance_from_document(document, runtime)
             actual = remittance.to_dict()
             for field, expected in item["expected_fields"].items():
                 hit = actual.get(field) == expected
@@ -93,7 +113,10 @@ def evaluate() -> dict:
             for extension, values in sorted(by_format.items())
         },
         "failed_documents": failures,
-        "notes": "Synthetic AR benchmark; production validation requires permissioned bank advice.",
+        "notes": (
+            "Synthetic live-agent AR benchmark with deterministic matching and posting guards; "
+            "production validation requires permissioned bank advice."
+        ),
     }
     output = ROOT / "results" / "ar-latest.json"
     output.parent.mkdir(exist_ok=True)

@@ -1,14 +1,14 @@
 flowchart LR
   EMAIL[Shared finance mailbox] --> GRAPH[Microsoft Graph adapter]
-  UPLOAD[Unified document API] --> DOC[Source hash + canonical processor]
+  UPLOAD[Unified document API] --> DOC[Deterministic document processor tool]
   GRAPH --> DOC
-  DOC --> CLASS[Deterministic AP / AR classifier]
-  CLASS -->|AP invoice| ORCH[Parent LangGraph orchestrator]
-  CLASS -->|AR remittance| ORCH
-  CLASS -->|ambiguous| HUMAN[Unified exception desk]
-  ORCH --> AP[AP subgraph: policy + 2/3-way match]
-  ORCH --> AR[AR subgraph: policy + open-item allocation]
-  POLICY[(Policies + pgvector)] --> LLAMA[LlamaIndex retrieval]
+  DOC --> SUP[Qwen 3.5 supervisor agent]
+  SUP -->|dispatch AP| ORCH[Parent LangGraph orchestrator]
+  SUP -->|dispatch AR| ORCH
+  SUP -->|ambiguous / conflict| HUMAN[Unified exception desk]
+  ORCH --> AP[AP agent: observe + bounded tools]
+  ORCH --> AR[AR agent: observe + bounded tools]
+  POLICY[(Policies + pgvector)] --> LLAMA[EmbeddingGemma + LlamaIndex]
   LLAMA --> AP
   LLAMA --> AR
   AP -->|clean| PJ[Payment Journal]
@@ -27,3 +27,5 @@ flowchart LR
   AR --> AUDIT
   HUMAN --> AUDIT
   ORCH -. traces .-> PHOENIX[Arize Phoenix]
+  AP -. agent + tool spans .-> PHOENIX
+  AR -. agent + tool spans .-> PHOENIX

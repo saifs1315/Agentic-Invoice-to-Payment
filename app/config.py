@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal, InvalidOperation
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,9 +21,13 @@ class Settings(BaseSettings):
     app_env: str = "development"
     database_url: str = "memory://"
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2:3b"
-    llm_extraction_enabled: bool = False
-    llm_explanations_enabled: bool = False
+    agent_runtime: Literal["ollama", "fake"] = "ollama"
+    ollama_model: str = "qwen3.5:2b-q4_K_M"
+    ollama_embedding_model: str = "embeddinggemma"
+    ollama_timeout_seconds: float = Field(default=300.0, gt=0)
+    ollama_context_length: int = Field(default=8192, ge=2048, le=32768)
+    agent_max_steps: int = Field(default=8, ge=3, le=20)
+    rag_similarity_threshold: float = Field(default=0.05, ge=-1, le=1)
     erp_mode: Literal["mock", "http"] = "mock"
     erp_base_url: str = "http://localhost:8080"
     erp_timeout_seconds: float = Field(default=5.0, gt=0)
@@ -62,6 +66,12 @@ class Settings(BaseSettings):
     graph_client_secret: str | None = None
     graph_mailbox: str | None = None
     graph_folder: str = "Inbox"
+
+    @model_validator(mode="after")
+    def reject_fake_runtime_outside_tests(self) -> "Settings":
+        if self.agent_runtime == "fake" and self.app_env.lower() != "test":
+            raise ValueError("AGENT_RUNTIME=fake is permitted only when APP_ENV=test")
+        return self
 
     @field_validator("max_monetary_amount", mode="before")
     @classmethod

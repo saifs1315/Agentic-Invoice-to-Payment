@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import re
 from datetime import date
 from decimal import Decimal
 from threading import RLock
-from typing import Any
+from typing import Any, Callable
 from uuid import NAMESPACE_URL, uuid5
 
 from app.domain import Invoice, InvoiceLine, MatchResult, PurchaseOrder, Remittance, Status, Variance
+from app.embeddings import deterministic_embedding
 
 
 POLICIES = [
@@ -22,17 +21,6 @@ POLICIES = [
     "Cash application must be idempotent and revalidate open-item state immediately before posting.",
     "Unapplied, partial, duplicate, or ambiguous remittances require human resolution.",
 ]
-
-
-def deterministic_embedding(text: str, dimensions: int = 768) -> list[float]:
-    """Create a stable local embedding suitable for an offline pgvector demo."""
-    vector = [0.0] * dimensions
-    for token in re.findall(r"[a-z0-9]+", text.lower()):
-        digest = hashlib.sha256(token.encode("utf-8")).digest()
-        index = int.from_bytes(digest[:4], "big") % dimensions
-        vector[index] += -1.0 if digest[4] & 1 else 1.0
-    norm = math.sqrt(sum(value * value for value in vector)) or 1.0
-    return [value / norm for value in vector]
 
 
 def _invoice_from_dict(data: dict[str, Any]) -> Invoice:
@@ -74,7 +62,7 @@ def _invoice_from_dict(data: dict[str, Any]) -> Invoice:
 class MemoryRepository:
     """Thread-safe repository used for tests and zero-dependency local execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, embedding_fn: Callable[[str], list[float]] | None = None) -> None:
         self.backend = "memory"
         self.invoices: dict[str, Invoice] = {}
         self.purchase_orders: dict[str, PurchaseOrder] = {}
@@ -87,6 +75,7 @@ class MemoryRepository:
         self.workflow_states: dict[str, dict[str, Any]] = {}
         self.source_documents: dict[str, dict[str, str]] = {}
         self.policies = list(POLICIES)
+        self.embedding_fn = embedding_fn or deterministic_embedding
         self._lock = RLock()
 
     def save_invoice(self, invoice: Invoice) -> Invoice:
@@ -232,8 +221,12 @@ class MemoryRepository:
 class PostgresRepository(MemoryRepository):
     """PostgreSQL repository with durable workflow state and pgvector policy retrieval."""
 
-    def __init__(self, database_url: str) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        database_url: str,
+        embedding_fn: Callable[[str], list[float]] | None = None,
+    ) -> None:
+        super().__init__(embedding_fn)
         from psycopg_pool import ConnectionPool
 
         self.pool = ConnectionPool(database_url, min_size=1, max_size=5, open=True)
@@ -265,7 +258,9 @@ class PostgresRepository(MemoryRepository):
     def _seed_policies(self) -> None:
         with self.pool.connection() as conn:
             for index, policy in enumerate(self.policies, start=1):
-                embedding = "[" + ",".join(f"{value:.8f}" for value in deterministic_embedding(policy)) + "]"
+                embedding = "[" + ",".join(
+                    f"{value:.8f}" for value in self.embedding_fn(policy)
+                ) + "]"
                 conn.execute(
                     """INSERT INTO policy_documents (id, content, embedding, metadata)
                     VALUES (%s,%s,%s::vector,%s::jsonb)
@@ -485,7 +480,9 @@ class PostgresRepository(MemoryRepository):
         return state
 
     def search_policies(self, query: str, top_k: int = 2) -> list[str]:
-        embedding = "[" + ",".join(f"{value:.8f}" for value in deterministic_embedding(query)) + "]"
+        embedding = "[" + ",".join(
+            f"{value:.8f}" for value in self.embedding_fn(query)
+        ) + "]"
         with self.pool.connection() as conn:
             rows = conn.execute(
                 "SELECT content FROM policy_documents ORDER BY embedding <=> %s::vector LIMIT %s",

@@ -2,7 +2,7 @@
   "dataset_size": 9,
   "evaluation_coverage": 1.0,
   "document_classification_accuracy": 1.0,
-  "field_level_extraction_accuracy": 0.9722,
+  "field_level_extraction_accuracy": 0.9444,
   "match_decision_accuracy": 1.0,
   "exception_classification_accuracy": 1.0,
   "false_cash_application_rate": 0.0,
@@ -10,7 +10,7 @@
   "formats": {
     "html": {
       "documents": 1,
-      "field_accuracy": 1.0,
+      "field_accuracy": 0.75,
       "decision_accuracy": 1.0
     },
     "json": {
@@ -35,5 +35,5 @@
     }
   },
   "failed_documents": [],
-  "notes": "Synthetic AR benchmark; production validation requires permissioned bank advice."
+  "notes": "Synthetic live-agent AR benchmark with deterministic matching and posting guards; production validation requires permissioned bank advice."
 }

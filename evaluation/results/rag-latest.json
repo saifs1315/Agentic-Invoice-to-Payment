@@ -28,13 +28,13 @@
     {
       "query": "A payable journal is retried after a timeout. Which approval and replay rule applies to posting?",
       "retrieved_context_ids": [
-        "policy-3"
+        "policy-4"
       ],
       "reference_context_ids": [
         "policy-4"
       ],
-      "context_precision": 0.0,
-      "context_recall": 0.0
+      "context_precision": 0.9999999999,
+      "context_recall": 1.0
     },
     {
       "query": "Finance receives a bill without a valid purchase order but records an authorized exception. Which rule governs it?",
@@ -95,12 +95,14 @@
     },
     {
       "query": "What is the employee meal reimbursement limit?",
-      "retrieved_context_ids": [],
+      "retrieved_context_ids": [
+        "policy-3"
+      ],
       "reference_context_ids": [],
-      "context_precision": 1.0,
-      "context_recall": 1.0,
-      "abstained": true
+      "context_precision": 0.0,
+      "context_recall": 0.0,
+      "abstained": false
     }
   ],
-  "notes": "Offline RAGAS non-LLM context precision and recall over paraphrased, multi-policy, and out-of-domain cases; no external LLM or embedding API is used."
+  "notes": "Offline RAGAS non-LLM context precision and recall over paraphrased, multi-policy, and out-of-domain cases using the required local Ollama embedding model; no external AI API is used."
 }

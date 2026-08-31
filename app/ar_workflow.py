@@ -3,6 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any, TypedDict
 
+from app.agent_runtime import AgentRuntime, create_agent_runtime
 from app.ar_matching import match_remittance
 from app.audit import AuditLedger
 from app.config import Settings
@@ -15,9 +16,11 @@ from app.repository import MemoryRepository
 class ARWorkflowState(TypedDict, total=False):
     remittance_id: str
     policies: list[str]
+    policy_ids: list[str]
     result: dict[str, Any]
     next_action: str
     application: dict[str, Any]
+    agent_decisions: list[dict[str, Any]]
 
 
 class RemittanceWorkflow:
@@ -29,10 +32,34 @@ class RemittanceWorkflow:
         audit: AuditLedger,
         erp: ERPClient,
         config: Settings,
+        runtime: AgentRuntime | None = None,
     ) -> None:
         self.repo, self.audit, self.erp, self.config = repo, audit, erp, config
-        self.context = ContextRetriever(repo)
+        self.runtime = runtime or create_agent_runtime(config)
+        self.context = ContextRetriever(repo, self.runtime, config)
         self.graph = self._build_graph()
+
+    def _agent_decide(
+        self,
+        remittance_id: str,
+        stage: str,
+        evidence: dict[str, Any],
+        allowed_actions: list[str],
+    ) -> dict[str, Any]:
+        decision = self.runtime.decide(
+            domain="ar",
+            stage=stage,
+            evidence=evidence,
+            allowed_actions=allowed_actions,
+        ).model_dump()
+        self.audit.append(
+            "remittance",
+            remittance_id,
+            "agent_decision",
+            "agent:ar",
+            {"stage": stage, "allowed_actions": allowed_actions, **decision},
+        )
+        return decision
 
     def _build_graph(self):
         try:
@@ -97,16 +124,34 @@ class RemittanceWorkflow:
         return {"remittance": remittance.to_dict(), **state}
 
     def _graph_retrieve_policy(self, state: ARWorkflowState) -> ARWorkflowState:
+        query = "customer remittance open AR items currency amount cash application idempotent"
+        decision = self._agent_decide(
+            state["remittance_id"],
+            "retrieve_policy",
+            {"expected_action": "RETRIEVE_POLICY", "query": query},
+            ["RETRIEVE_POLICY"],
+        )
+        policies_with_ids = self.context.retrieve_with_ids(query)
         update: ARWorkflowState = {
-            "policies": self.context.retrieve(
-                "customer remittance open AR items currency amount cash application idempotent"
-            )
+            "policies": [policy for _, policy in policies_with_ids],
+            "policy_ids": [policy_id for policy_id, _ in policies_with_ids],
+            "agent_decisions": [*state.get("agent_decisions", []), decision],
         }
         self._persist("retrieve_ar_policy", {**state, **update})
         return update
 
     def _graph_match(self, state: ARWorkflowState) -> ARWorkflowState:
         remittance = self._remittance_or_raise(state["remittance_id"])
+        match_decision = self._agent_decide(
+            remittance.id,
+            "request_erp_match",
+            {
+                "expected_action": "RUN_AR_MATCH",
+                "policies": state.get("policies", []),
+                "policy_ids": state.get("policy_ids", []),
+            },
+            ["RUN_AR_MATCH"],
+        )
         try:
             open_items = self.erp.get_open_items(remittance.customer_id)
         except ERPError as exc:
@@ -136,13 +181,40 @@ class RemittanceWorkflow:
             "agent:ar-matcher",
             {"result": result, "policies": state.get("policies", [])},
         )
-        update: ARWorkflowState = {"result": result}
+        expected_action = (
+            "APPLY_CASH"
+            if result["matched"]
+            and self.config.auto_post_enabled
+            and not self.config.require_human_approval
+            else "ESCALATE"
+        )
+        route_decision = self._agent_decide(
+            remittance.id,
+            "evaluate_match",
+            {
+                "expected_action": expected_action,
+                "deterministic_result": result,
+                "policies": state.get("policies", []),
+                "policy_ids": state.get("policy_ids", []),
+            },
+            [expected_action],
+        )
+        update: ARWorkflowState = {
+            "result": result,
+            "agent_decisions": [
+                *state.get("agent_decisions", []),
+                match_decision,
+                route_decision,
+            ],
+        }
         self._persist("deterministic_ar_match", {**state, **update})
         return update
 
     def _route_after_match(self, state: ARWorkflowState) -> str:
+        action = state.get("agent_decisions", [{}])[-1].get("action")
         if (
             state["result"]["matched"]
+            and action == "APPLY_CASH"
             and self.config.auto_post_enabled
             and not self.config.require_human_approval
         ):
@@ -215,7 +287,14 @@ class RemittanceWorkflow:
                 state.update(self._graph_finalize(state))
         return {
             key: state[key]
-            for key in ("result", "next_action", "application", "policies")
+            for key in (
+                "result",
+                "next_action",
+                "application",
+                "policies",
+                "policy_ids",
+                "agent_decisions",
+            )
             if key in state
         }
 

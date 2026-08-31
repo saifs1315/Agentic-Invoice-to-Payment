@@ -13,7 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.audit import AuditLedger
+from app.agent_runtime import create_agent_runtime
 from app.config import Settings
+from app.context import POLICY_QUERIES
 from app.erp import MockERP
 from app.extraction import extract_invoice
 from app.repository import MemoryRepository
@@ -24,6 +26,10 @@ ROOT = Path(__file__).resolve().parent
 
 
 def evaluate() -> dict:
+    config = Settings()
+    runtime = create_agent_runtime(config)
+    MemoryRepository(runtime.embed)
+    runtime.embed(POLICY_QUERIES["ap"])
     dataset = json.loads((ROOT / "dataset.json").read_text(encoding="utf-8"))
     requested_formats = {
         value.strip().lower().lstrip(".")
@@ -35,6 +41,17 @@ def evaluate() -> dict:
             item
             for item in dataset
             if Path(item["file"]).suffix.lower().lstrip(".") in requested_formats
+        ]
+    requested_files = {
+        value.strip().replace("\\", "/")
+        for value in os.getenv("EVALUATION_FILES", "").split(",")
+        if value.strip()
+    }
+    if requested_files:
+        dataset = [
+            item
+            for item in dataset
+            if item["file"] in requested_files or Path(item["file"]).name in requested_files
         ]
     field_hits = field_total = match_hits = exception_hits = posted = 0
     audit_valid = false_auto_posts = exception_cases = exception_routed = 0
@@ -55,14 +72,15 @@ def evaluate() -> dict:
         if item["expected_exception"] is not None:
             exception_cases += 1
 
-        repo, audit, erp = MemoryRepository(), AuditLedger(), MockERP()
-        workflow = InvoiceWorkflow(repo, audit, erp, Settings())
+        repo, audit, erp = MemoryRepository(runtime.embed), AuditLedger(), MockERP()
+        workflow = InvoiceWorkflow(repo, audit, erp, config, runtime)
         try:
             invoice = extract_invoice(
                 path.read_bytes(),
                 path.name,
                 f"fixture:{path.name}",
                 processor=item.get("processor", "auto"),
+                runtime=runtime,
             )
             workflow.ingest(invoice)
             actual = invoice.to_dict()
@@ -98,7 +116,7 @@ def evaluate() -> dict:
 
     count = len(dataset)
     if count == 0:
-        raise ValueError("EVALUATION_FORMATS did not select any dataset items")
+        raise ValueError("evaluation filters did not select any dataset items")
     format_metrics = {
         extension: {
             "documents": values["documents"],
@@ -125,8 +143,9 @@ def evaluate() -> dict:
         "failed_documents": failures,
         "notes": (
             "Synthetic seven-document benchmark spanning JSON, text-native PDF, scan-like PNG, "
-            "and a forced-Docling HTML case. Finance decisions remain deterministic; production "
-            "validation requires permissioned vendor samples."
+            "and a forced-Docling HTML case. The live agent performs extraction and bounded action "
+            "selection while deterministic finance controls remain authoritative. Production "
+            "validation still requires permissioned vendor samples."
         ),
     }
     output = ROOT / "results" / "latest.json"

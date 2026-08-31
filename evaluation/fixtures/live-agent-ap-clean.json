@@ -1,0 +1,17 @@
+{
+  "vendor_id": "VEND-001",
+  "invoice_number": "INV-QWEN-LIVE-001",
+  "invoice_date": "2026-08-31",
+  "po_number": "PO-1001",
+  "currency": "USD",
+  "total": "1000.00",
+  "lines": [
+    {
+      "description": "Industrial sensors",
+      "quantity": "10",
+      "unit_price": "100.00",
+      "amount": "1000.00",
+      "po_line": 1
+    }
+  ]
+}

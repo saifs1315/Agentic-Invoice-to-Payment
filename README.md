@@ -1,21 +1,21 @@
 # LedgerPilot
 
-LedgerPilot is an auditable agentic-finance prototype for accounts-payable invoices and accounts-receivable remittances. One document-processing layer converts and classifies mailbox or API attachments; a parent LangGraph orchestrator then dispatches the typed payload to an AP or AR subgraph. AP performs deterministic two-way/three-way matching and posts a Payment Journal, while AR mirrors the same retrieve-match-resolve/post pattern against open items and applies cash. Both use a separate stateful Mock ERP HTTP API.
+LedgerPilot is an auditable agentic-finance prototype for accounts-payable invoices and accounts-receivable remittances. A deterministic document-processing tool converts mailbox or API attachments into canonical text, candidate fields, provenance, and confidence. A mandatory local supervisor agent then classifies the evidence and dispatches an AP or AR agent. AP performs two-way/three-way matching and posts a Payment Journal, while AR mirrors the same observe-retrieve-match-resolve/post pattern against open items and applies cash. Both use a separate stateful Mock ERP HTTP API.
 
-The prototype intentionally separates probabilistic AI from financial controls: direct PDF text extraction and EasyOCR handle common documents, Docling provides the rich-layout fallback, and optional Ollama provides schema-constrained extraction and non-authoritative explanations. A real LlamaIndex vector index and PostgreSQL/pgvector retrieve policy context. Deterministic code evaluates arithmetic, tolerances, duplicate rules, approval requirements, and posting eligibility.
+AI is a runtime requirement, not an optional enhancement. Ollama runs `qwen3.5:2b-q4_K_M` for schema-constrained extraction, supervisor routing, and bounded AP/AR action selection; `embeddinggemma` powers LlamaIndex and PostgreSQL/pgvector policy retrieval. Probabilistic decisions are never allowed to weaken financial controls: Pydantic schemas, per-stage action allow-lists, fixed LangGraph transitions, arithmetic and tolerance checks, approval state, idempotency, and final posting guards remain deterministic and authoritative. If either model is unavailable, finance execution fails closed with `503`.
 
 ## What is included
 
 - Microsoft Graph shared-mailbox adapter plus unified PDF, image, HTML, text, and JSON ingestion at `POST /api/v1/ingest-document`.
-- One canonical document layer with deterministic AP/AR classification, typed domain extraction, evidence, confidence, and backend-attempt traces; ambiguity is escalated instead of guessed.
-- A parent LangGraph finance orchestrator that dispatches to independently controlled AP and AR LangGraph subworkflows.
-- LlamaIndex `VectorStoreIndex` retrieval fused with PostgreSQL/pgvector policy ranking and an offline fallback.
+- One deterministic canonical document tool shared by both domains; it produces text, candidate evidence, confidence, and backend-attempt traces but performs no business action.
+- A mandatory Qwen 3.5 supervisor agent and independently bounded AP and AR agents, orchestrated with parent and domain LangGraphs.
+- Genuine semantic RAG through `embeddinggemma`, LlamaIndex `VectorStoreIndex`, and PostgreSQL/pgvector ranking; deterministic hash embeddings exist only in an explicitly test-only runtime.
 - Two-way and three-way PO/GR matching with configurable tolerances, partial-invoice support, and bounded tax/freight/discount reconciliation.
 - Exception detection for arithmetic mismatches, missing PO/line, duplicate invoice, vendor/currency mismatch, price/quantity/total variance, and receipt shortfall.
 - Unified AP/AR exception desk plus domain-specific, audited human actions.
 - Separate FastAPI Mock ERP service with PO, Goods Receipt, Payment Journal, open-AR-item, and cash-application endpoints; application containers use an HTTP client boundary.
 - Mirrored AR document extraction, policy retrieval, deterministic allocation, review/correction/re-match, and idempotent cash application. Invalid matches cannot be force-approved.
-- SHA-256 hash-chained audit events and optional PostgreSQL persistence.
+- SHA-256 hash-chained tool-call, agent-decision, control, human, and ERP audit events plus PostgreSQL persistence in Compose.
 - Durable PostgreSQL workflow state, journals, remittances, and policy embeddings.
 - PostgreSQL 16 + pgvector schema, Ollama, and Arize Phoenix services.
 - OpenAPI contract, automated tests, synthetic evaluation harness, architecture diagrams, and presentation deck.
@@ -28,16 +28,16 @@ The editable Mermaid sources and a detailed explanation are in [docs/architectur
 
 ## Quick start: Docker Compose
 
-Prerequisites: Docker Desktop with Compose v2 and at least 6 GB of free memory for the optional AI services.
+Prerequisites: Docker Desktop with Compose v2. The default model pair is tuned for the tested 4 GB GPU / constrained Docker environment: a 1.9 GB Q4 Qwen model plus a 622 MB embedding model, one loaded model at a time, with an 8K context cap. Give Docker at least 4 GB when possible; first startup downloads the Ollama image and both models.
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up --build -d postgres mock-erp api
+docker compose up --build -d
 Invoke-RestMethod http://localhost:8000/api/v1/health
 Invoke-RestMethod http://localhost:8080/erp/v1/health
 ```
 
-The application health response reports the active LangGraph, LlamaIndex, Docling, Ollama-client, Phoenix, repository, and AI-feature capabilities. A failed configured PostgreSQL startup is logged and reported as `degraded` rather than silently appearing healthy.
+The model initializer blocks API startup until both models are pulled. The health response reports the exact runtime/model readiness plus LangGraph, LlamaIndex, Docling, Phoenix, repository, and audit status. Missing AI models return HTTP `503`; a failed configured PostgreSQL startup is reported as `degraded`.
 
 Compose uses the named `ledgerpilot-unified-postgres-data` volume by default. This isolates the unified workflow schema and audit chain from any pre-refactor local demo volume without deleting the older data. Override `POSTGRES_VOLUME_NAME` when a different retained environment is intentional.
 
@@ -53,14 +53,7 @@ Run the AP happy-path demo:
 .\scripts\demo.ps1
 ```
 
-Start optional local AI and observability services:
-
-```powershell
-docker compose --profile ai --profile observability up --build -d
-docker compose exec ollama ollama pull llama3.2:3b
-```
-
-Phoenix is then available at <http://localhost:6006>.
+Phoenix is available at <http://localhost:6006> and receives explicit spans for Ollama chat, embeddings, supervisor/domain decisions, and instrumented LangGraph activity.
 
 OCR models are downloaded into the container's temporary cache on first image processing. For a reusable local evaluation cache, mount a volume at `/tmp` as shown in `docs/evaluation-report.md` or run the Compose API service normally.
 
@@ -183,9 +176,13 @@ The Compose service explicitly passes these values into the API container. Call 
 | `MAX_MONETARY_AMOUNT` | `1000000000.00` | Positive prototype ceiling for invoice and remittance monetary fields; set per deployment and currency scope |
 | `REQUIRE_HUMAN_APPROVAL` | `false` | Require explicit approval before every posting |
 | `AUTO_POST_ENABLED` | `true` | Deployment policy flag for automatic posting |
-| `OLLAMA_MODEL` | `llama3.2:3b` | Local model used by optional AI extensions |
-| `LLM_EXTRACTION_ENABLED` | `false` | Ask Ollama for schema-constrained invoice JSON before regex fallback |
-| `LLM_EXPLANATIONS_ENABLED` | `false` | Generate non-authoritative reviewer explanations with Ollama |
+| `AGENT_RUNTIME` | `ollama` | Mandatory production runtime; `fake` is rejected unless `APP_ENV=test` |
+| `OLLAMA_MODEL` | `qwen3.5:2b-q4_K_M` | Local schema extraction, supervisor, and AP/AR reasoning model |
+| `OLLAMA_EMBEDDING_MODEL` | `embeddinggemma` | Local 768-dimensional semantic retrieval model |
+| `OLLAMA_CONTEXT_LENGTH` | `8192` | Bounded context window chosen for local hardware |
+| `OLLAMA_TIMEOUT_SECONDS` | `300` | Allows the first CPU/GPU model load on constrained local hardware |
+| `AGENT_MAX_STEPS` | `8` | Upper bound documented for agent workflows; current fixed graphs use at most four decisions |
+| `RAG_SIMILARITY_THRESHOLD` | `0.05` | Minimum semantic similarity for retrieved policy evidence |
 | `DATABASE_URL` | `memory://` locally | PostgreSQL connection string |
 | `MAX_UPLOAD_MB` | `15` | Attachment size limit |
 
@@ -201,11 +198,11 @@ For SAP, Oracle, or NetSuite, implement the same interface, map external IDs int
 
 ## Evaluation results
 
-The checked-in document benchmark has seven synthetic documents across JSON, PDF, scan-like PNG, and HTML. One HTML case is explicitly forced through Docling, so the fallback processor is exercised rather than merely importable. A separate nine-query policy set tests paraphrases, a multi-policy question, distractors, and out-of-domain abstention with RAGAS non-LLM retrieval metrics over the real LlamaIndex path.
+The checked-in live-agent benchmark has seven synthetic AP documents and nine AR documents across JSON, PDF, scan-like PNG, text, and HTML. Non-JSON cases use the required Qwen extraction path. A separate nine-query policy set tests paraphrases, a multi-policy question, distractors, and out-of-domain abstention over the real `embeddinggemma`/LlamaIndex path.
 
 | Metric | Result |
 |---|---:|
-| Field-level extraction accuracy | 100.00% |
+| AP field-level extraction accuracy | 88.57% |
 | Match-decision accuracy | 100.00% |
 | Exception-classification accuracy | 100.00% |
 | Exception-routing recall | 100.00% |
@@ -213,10 +210,13 @@ The checked-in document benchmark has seven synthetic documents across JSON, PDF
 | Straight-through-processing rate | 57.14% |
 | False auto-post rate | 0.00% |
 | Audit-chain integrity | 100.00% |
+| AR field-level extraction accuracy | 94.44% |
+| AR match-decision accuracy | 100.00% |
+| False cash-application rate | 0.00% |
 | RAGAS context precision | 88.89% |
 | RAGAS context recall | 88.89% |
 
-These numbers validate controlled behavior, not production generalization. A production pilot must use representative, permissioned invoices and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
+These are live local-model results, not deterministic-test-double scores. They validate controlled behavior, not production generalization. A production pilot must use representative, permissioned documents and report confidence intervals by vendor/template. See [docs/evaluation-report.md](docs/evaluation-report.md).
 
 ## Security and control posture
 

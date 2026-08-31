@@ -5,18 +5,30 @@ import json
 from decimal import Decimal
 from typing import Any
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from app.bootstrap import ar_workflow, audit, orchestrator, repo, runtime_capabilities, workflow
+from app.agent_runtime import AIRuntimeUnavailableError, AgentProtocolError
+from app.bootstrap import (
+    agent_runtime,
+    ar_workflow,
+    audit,
+    orchestrator,
+    repo,
+    runtime_capabilities,
+    workflow,
+)
 from app.config import settings
-from app.document_processing import UnifiedDocumentProcessor
 from app.domain import DocumentKind, SourceEnvelope, Status
-from app.extraction import extract_invoice_from_document, extract_remittance
+from app.extraction import extract_remittance
 from app.erp import ERPConflictError, ERPUnavailableError
 
-app = FastAPI(title="LedgerPilot API", version="0.2.0", description="Auditable agentic invoice-to-payment and remittance automation")
+app = FastAPI(
+    title="LedgerPilot API",
+    version="0.3.0",
+    description="Auditable mandatory-AI invoice-to-payment and remittance automation",
+)
 ERP_API_RESPONSES = {
     409: {"description": "ERP business-state conflict"},
     503: {"description": "ERP transport or server failure"},
@@ -31,6 +43,16 @@ async def erp_conflict_handler(_: Request, exc: ERPConflictError) -> JSONRespons
 @app.exception_handler(ERPUnavailableError)
 async def erp_unavailable_handler(_: Request, exc: ERPUnavailableError) -> JSONResponse:
     return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(AIRuntimeUnavailableError)
+async def ai_unavailable_handler(_: Request, exc: AIRuntimeUnavailableError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc), "ai_required": True})
+
+
+@app.exception_handler(AgentProtocolError)
+async def agent_protocol_handler(_: Request, exc: AgentProtocolError) -> JSONResponse:
+    return JSONResponse(status_code=502, content={"detail": str(exc), "ai_required": True})
 
 
 class MatchRequest(BaseModel):
@@ -115,11 +137,6 @@ async def ingest_invoice(file: UploadFile = File(...)) -> dict[str, Any]:
     content = await _read_upload_limited(file)
     source_hash = hashlib.sha256(content).hexdigest()
     source_ref = f"sha256:{source_hash}"
-    repo.save_source_document(
-        source_ref,
-        file.content_type or "application/octet-stream",
-        source_hash,
-    )
     try:
         envelope = _source_envelope(
             content,
@@ -128,9 +145,7 @@ async def ingest_invoice(file: UploadFile = File(...)) -> dict[str, Any]:
             source_ref,
             DocumentKind.AP_INVOICE,
         )
-        document = UnifiedDocumentProcessor().process(envelope)
-        invoice = extract_invoice_from_document(document)
-        return workflow.ingest(invoice)
+        return orchestrator.ingest_only(envelope, DocumentKind.AP_INVOICE)
     except (ValueError, json.JSONDecodeError) as exc:
         audit.append(
             "source_document",
@@ -300,17 +315,27 @@ def audit_log(entity_id: str | None = None, limit: int = Query(100, ge=1, le=100
 
 
 @app.get("/api/v1/health", tags=["Operations"])
-def health() -> dict[str, Any]:
+def health(response: Response) -> dict[str, Any]:
+    ai = agent_runtime.capabilities()
+    capabilities = {
+        **runtime_capabilities,
+        "agent_runtime": ai,
+        "supervisor_agent_ready": ai["ready"],
+        "ap_agent_ready": ai["ready"],
+        "ar_agent_ready": ai["ready"],
+    }
     degraded = bool(runtime_capabilities["repository_degraded"])
+    if not ai["ready"]:
+        response.status_code = 503
     return {
-        "status": "degraded" if degraded else "ok",
-        "version": "0.2.0",
+        "status": "unavailable" if not ai["ready"] else ("degraded" if degraded else "ok"),
+        "version": "0.3.0",
         "environment": settings.app_env,
         "database": repo.backend,
         "erp": settings.erp_mode,
         "erp_base_url": settings.erp_base_url if settings.erp_mode == "http" else None,
         "audit_chain_valid": audit.integrity_status(),
-        "capabilities": runtime_capabilities,
+        "capabilities": capabilities,
     }
 
 
